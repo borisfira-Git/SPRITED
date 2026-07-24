@@ -7,7 +7,7 @@
   const images = new Map();
   const state = {
     projectName: "Untitled Animation", frames: [], selectedId: null, selectedIds: [], selectionAnchorId: null, referenceId: null,
-    canvasWidth: 512, canvasHeight: 512, groundRatio: .88, anchorRatio: .5, targetHeightRatio: .72, fps: 12, loop: true,
+    canvasWidth: 512, canvasHeight: 512, groundRatio: .88, anchorRatio: .5, targetHeightRatio: .72, rulerBottomRatio: .88, fps: 12, loop: true,
     playing: false, zoom: 1, tool: "move", grid: true, ground: true, guides: true, bounds: true,
     sliceImage: null, sliceName: "", history: [], future: []
   };
@@ -36,7 +36,7 @@
       selectedId: state.selectedId, selectedIds: [...state.selectedIds], selectionAnchorId: state.selectionAnchorId,
       referenceId: state.referenceId, canvasWidth: state.canvasWidth,
       canvasHeight: state.canvasHeight, groundRatio: state.groundRatio, anchorRatio: state.anchorRatio,
-      targetHeightRatio: state.targetHeightRatio, fps: state.fps, loop: state.loop
+      targetHeightRatio: state.targetHeightRatio, rulerBottomRatio: state.rulerBottomRatio, fps: state.fps, loop: state.loop
     };
   }
   function restore(data) {
@@ -46,6 +46,7 @@
       selectionAnchorId: data.selectionAnchorId || data.selectedId || null,
       anchorRatio: data.anchorRatio ?? .5,
       targetHeightRatio: data.targetHeightRatio ?? .72,
+      rulerBottomRatio: clamp(data.rulerBottomRatio ?? data.groundRatio ?? .88,(data.targetHeightRatio ?? .72)+.01,.99),
       playing: false
     });
     images.clear(); syncInputs(); renderAll();
@@ -264,7 +265,7 @@
       if(!created.length)throw new Error("No frames detected");
       const requestedBodyHeight=state.canvasHeight*state.targetHeightRatio;
       const safeBodyHeight=Math.min(...created.map((frame)=>Math.min(state.canvasWidth*.9*frame.charBounds.h/Math.max(1,frame.alphaBounds.w),state.canvasHeight*.9*frame.charBounds.h/Math.max(1,frame.alphaBounds.h))));
-      const bodyHeight=clamp(Math.min(requestedBodyHeight,safeBodyHeight),state.canvasHeight*.15,state.canvasHeight*.95);state.targetHeightRatio=bodyHeight/state.canvasHeight;
+      const bodyHeight=clamp(Math.min(requestedBodyHeight,safeBodyHeight),state.canvasHeight*.15,state.canvasHeight*.95);state.targetHeightRatio=bodyHeight/state.canvasHeight;state.rulerBottomRatio=clamp(state.rulerBottomRatio,state.targetHeightRatio+.01,.99);
       created.forEach((frame)=>{frame.scale=clamp(bodyHeight/Math.max(1,frame.charBounds.h),.05,10);Object.assign(frame,centerPatch(frame));Object.assign(frame,groundPatch(frame))});
       state.frames.push(...created);state.selectedId=created[0].id;state.selectedIds=[created[0].id];state.selectionAnchorId=created[0].id;state.referenceId ||= created[0].id;
       $("#bgColor").value=colorHex(key);images.clear();syncInputs();renderAll();fitZoom();status("Auto import complete");
@@ -302,15 +303,19 @@
       target.fillStyle="#a8ffd0";target.font="bold 11px system-ui";target.fillText("GROUND",12,y-10);
     }
     if (state.guides) {
-      const ax=state.canvasWidth*state.anchorRatio,groundY=state.canvasHeight*state.groundRatio,topY=groundY-state.canvasHeight*state.targetHeightRatio,rulerX=clamp(ax-34,14,state.canvasWidth-14);
+      const ax=state.canvasWidth*state.anchorRatio,groundY=state.canvasHeight*state.groundRatio,rulerBottomY=state.canvasHeight*state.rulerBottomRatio,topY=rulerBottomY-state.canvasHeight*state.targetHeightRatio,rulerX=clamp(ax-34,14,state.canvasWidth-14);
+      const rulerPixels=Math.round(state.canvasHeight*state.targetHeightRatio),labelX=clamp(rulerX-34,4,state.canvasWidth-76),labelY=clamp(topY-25,4,state.canvasHeight-23);
       target.setLineDash([10,6]);target.lineWidth=6;target.strokeStyle="#28140d";target.beginPath();target.moveTo(ax,0);target.lineTo(ax,state.canvasHeight);target.stroke();
       target.lineWidth=3;target.strokeStyle="#ffd08a";target.beginPath();target.moveTo(ax,0);target.lineTo(ax,state.canvasHeight);target.stroke();
-      target.setLineDash([]);target.lineWidth=6;target.strokeStyle="#28140d";target.beginPath();target.moveTo(rulerX,topY);target.lineTo(rulerX,groundY);target.moveTo(rulerX-9,topY);target.lineTo(rulerX+9,topY);target.moveTo(rulerX-9,groundY);target.lineTo(rulerX+9,groundY);target.stroke();
-      target.lineWidth=3;target.strokeStyle="#ffd08a";target.beginPath();target.moveTo(rulerX,topY);target.lineTo(rulerX,groundY);target.moveTo(rulerX-9,topY);target.lineTo(rulerX+9,topY);target.moveTo(rulerX-9,groundY);target.lineTo(rulerX+9,groundY);target.stroke();
-      for(let y=topY;y<=groundY;y+=Math.max(12,state.canvasHeight*.05)){target.lineWidth=3;target.beginPath();target.moveTo(rulerX-5,y);target.lineTo(rulerX+5,y);target.stroke()}
+      target.setLineDash([]);target.lineWidth=6;target.strokeStyle="#28140d";target.beginPath();target.moveTo(rulerX,topY);target.lineTo(rulerX,rulerBottomY);target.moveTo(rulerX-11,topY);target.lineTo(rulerX+11,topY);target.moveTo(rulerX-11,rulerBottomY);target.lineTo(rulerX+11,rulerBottomY);target.stroke();
+      target.lineWidth=3;target.strokeStyle="#ffd08a";target.beginPath();target.moveTo(rulerX,topY);target.lineTo(rulerX,rulerBottomY);target.moveTo(rulerX-11,topY);target.lineTo(rulerX+11,topY);target.moveTo(rulerX-11,rulerBottomY);target.lineTo(rulerX+11,rulerBottomY);target.stroke();
+      for(let y=topY;y<=rulerBottomY;y+=Math.max(12,state.canvasHeight*.05)){target.lineWidth=3;target.beginPath();target.moveTo(rulerX-5,y);target.lineTo(rulerX+5,y);target.stroke()}
+      target.fillStyle="#ffd08a";target.strokeStyle="#28140d";target.lineWidth=3;target.fillRect(rulerX-7,topY-5,14,10);target.strokeRect(rulerX-7,topY-5,14,10);target.fillRect(rulerX-7,rulerBottomY-5,14,10);target.strokeRect(rulerX-7,rulerBottomY-5,14,10);
+      target.fillStyle="#28140d";target.fillRect(labelX,labelY,72,19);target.strokeStyle="#ffd08a";target.lineWidth=2;target.strokeRect(labelX,labelY,72,19);
+      target.fillStyle="#ffe2ad";target.font="bold 10px system-ui";target.fillText(`${rulerPixels} px`,labelX+10,labelY+13);
       const fenceLeft=Math.max(2,ax-44),fenceRight=Math.min(state.canvasWidth-2,ax+44);
-      target.lineWidth=8;target.strokeStyle="#28140d";target.beginPath();target.moveTo(fenceLeft,groundY);target.lineTo(fenceRight,groundY);target.moveTo(fenceLeft,groundY-10);target.lineTo(fenceLeft,groundY+10);target.moveTo(fenceRight,groundY-10);target.lineTo(fenceRight,groundY+10);target.stroke();
-      target.lineWidth=4;target.strokeStyle="#ffd08a";target.beginPath();target.moveTo(fenceLeft,groundY);target.lineTo(fenceRight,groundY);target.moveTo(fenceLeft,groundY-10);target.lineTo(fenceLeft,groundY+10);target.moveTo(fenceRight,groundY-10);target.lineTo(fenceRight,groundY+10);target.stroke();
+      target.lineWidth=8;target.strokeStyle="#28140d";target.beginPath();target.moveTo(fenceLeft,rulerBottomY);target.lineTo(fenceRight,rulerBottomY);target.moveTo(fenceLeft,rulerBottomY-10);target.lineTo(fenceLeft,rulerBottomY+10);target.moveTo(fenceRight,rulerBottomY-10);target.lineTo(fenceRight,rulerBottomY+10);target.stroke();
+      target.lineWidth=4;target.strokeStyle="#ffd08a";target.beginPath();target.moveTo(fenceLeft,rulerBottomY);target.lineTo(fenceRight,rulerBottomY);target.moveTo(fenceLeft,rulerBottomY-10);target.lineTo(fenceLeft,rulerBottomY+10);target.moveTo(fenceRight,rulerBottomY-10);target.lineTo(fenceRight,rulerBottomY+10);target.stroke();
       target.fillStyle="#28140d";target.strokeStyle="#ffd08a";target.lineWidth=3;target.beginPath();target.arc(ax,groundY,9,0,Math.PI*2);target.fill();target.stroke();
       target.fillStyle="#28140d";target.fillRect(ax+12,groundY-25,62,18);target.strokeStyle="#ffd08a";target.lineWidth=2;target.strokeRect(ax+12,groundY-25,62,18);
       target.fillStyle="#ffe2ad";target.font="bold 10px system-ui";target.fillText("ANCHOR",ax+18,groundY-12);
@@ -420,7 +425,8 @@
     $("#projectName").value = state.projectName; $("#canvasWidth").value = state.canvasWidth; $("#canvasHeight").value = state.canvasHeight;
     $("#groundLine").value = state.groundRatio*100; $("#groundOutput").textContent = `${Math.round(state.groundRatio*100)}%`;
     $("#anchorLine").value = state.anchorRatio*100; $("#anchorOutput").textContent = `${Math.round(state.anchorRatio*100)}%`;
-    $("#rulerHeight").value = state.targetHeightRatio*100; $("#rulerOutput").textContent = `${Math.round(state.targetHeightRatio*100)}%`;
+    $("#rulerHeight").value = state.targetHeightRatio*100; $("#rulerOutput").textContent = `${Math.round(state.canvasHeight*state.targetHeightRatio)} px · ${Math.round(state.targetHeightRatio*100)}%`;
+    $("#rulerPosition").value = state.rulerBottomRatio*100; $("#rulerPositionOutput").textContent = `${Math.round(state.rulerBottomRatio*100)}%`;
     $("#guidesBtn").classList.toggle("active", state.guides);
     $("#fpsInput").value = state.fps; $("#loopBtn").classList.toggle("active", state.loop);
   }
@@ -483,7 +489,7 @@
   }
   function captureGuides() {
     const f=selected();if(!f)return;commit();const b=renderedBounds(f);
-    state.anchorRatio=clamp((b.x+b.w/2)/state.canvasWidth,.05,.95);state.groundRatio=clamp((b.y+b.h)/state.canvasHeight,.5,.98);state.targetHeightRatio=clamp(b.h/state.canvasHeight,.1,.95);
+    state.anchorRatio=clamp((b.x+b.w/2)/state.canvasWidth,.05,.95);state.groundRatio=clamp((b.y+b.h)/state.canvasHeight,.5,.98);state.targetHeightRatio=clamp(b.h/state.canvasHeight,.05,.95);state.rulerBottomRatio=clamp((b.y+b.h)/state.canvasHeight,state.targetHeightRatio+.01,.99);
     syncInputs();renderAll();toast("Anchor and ruler read from selected frame","success");
   }
   function alignSelectedToGuides() {
@@ -582,7 +588,7 @@
     $("#autoInput").onchange=e=>{autoImport(e.target.files[0]);e.target.value=""};
     $("#sheetInput").onchange=e=>{openSlicer(e.target.files[0]);e.target.value=""};$("#framesInput").onchange=e=>{importFrames(e.target.files);e.target.value=""};
     $("#openBtn").onclick=()=>$("#projectInput").click();$("#projectInput").onchange=e=>{if(e.target.files[0])openProject(e.target.files[0]);e.target.value=""};
-    $("#saveBtn").onclick=saveProject;$("#newBtn").onclick=()=>{if(state.frames.length&&!confirm("Start a new project? Unsaved work will be cleared."))return;restore({version:1,projectName:"Untitled Animation",frames:[],selectedId:null,referenceId:null,canvasWidth:512,canvasHeight:512,groundRatio:.88,anchorRatio:.5,targetHeightRatio:.72,fps:12,loop:true});state.history=[];state.future=[]};
+    $("#saveBtn").onclick=saveProject;$("#newBtn").onclick=()=>{if(state.frames.length&&!confirm("Start a new project? Unsaved work will be cleared."))return;restore({version:1,projectName:"Untitled Animation",frames:[],selectedId:null,referenceId:null,canvasWidth:512,canvasHeight:512,groundRatio:.88,anchorRatio:.5,targetHeightRatio:.72,rulerBottomRatio:.88,fps:12,loop:true});state.history=[];state.future=[]};
     $("#undoBtn").onclick=undo;$("#redoBtn").onclick=redo;
     $("#exportBtn").onclick=()=>{$("#exportPrefix").value=state.projectName==="Untitled Animation"?"animation":state.projectName;updateExport();$("#exportModal").classList.remove("hidden")};
     $("#firstBtn").onclick=()=>{if(state.frames[0]){state.selectedId=state.frames[0].id;state.selectedIds=[state.frames[0].id];state.selectionAnchorId=state.frames[0].id;renderAll()}};$("#reverseBtn").onclick=()=>{if(state.frames.length>1){commit();state.frames.reverse();renderAll()}};
@@ -597,10 +603,11 @@
     $("#detectBtn").onclick=detectBounds;$("#referenceBtn").onclick=()=>{const f=selected();commit();state.referenceId=f.id;renderAll()};$("#matchBtn").onclick=()=>{const f=selected(),r=reference();if(!f||!r)return;commit();Object.assign(f,match(f,r));renderAll()};
     $("#trimBtn").onclick=trim;$("#fitFrameBtn").onclick=fitFrame;$("#normalizeBtn").onclick=normalize;$("#resetBtn").onclick=()=>{const f=selected();if(!f)return;commit();Object.assign(f,{x:0,y:0,scale:1,rotation:0,charBounds:{...f.alphaBounds}});renderAll()};
     bindNumber("#canvasWidth",v=>{commit();state.canvasWidth=clamp(v,16,4096);renderAll();fitZoom()});bindNumber("#canvasHeight",v=>{commit();state.canvasHeight=clamp(v,16,4096);renderAll();fitZoom()});
-    ["#groundLine","#anchorLine","#rulerHeight"].forEach((id)=>{$(id).onpointerdown=()=>commit();$(id).onkeydown=e=>{if(["ArrowLeft","ArrowRight","Home","End","PageUp","PageDown"].includes(e.key))commit()}});
+    ["#groundLine","#anchorLine","#rulerHeight","#rulerPosition"].forEach((id)=>{$(id).onpointerdown=()=>commit();$(id).onkeydown=e=>{if(["ArrowLeft","ArrowRight","Home","End","PageUp","PageDown"].includes(e.key))commit()}});
     $("#groundLine").oninput=e=>{state.groundRatio=Number(e.target.value)/100;$("#groundOutput").textContent=`${e.target.value}%`;renderCanvas()};
     $("#anchorLine").oninput=e=>{state.anchorRatio=Number(e.target.value)/100;$("#anchorOutput").textContent=`${e.target.value}%`;renderCanvas()};
-    $("#rulerHeight").oninput=e=>{state.targetHeightRatio=Number(e.target.value)/100;$("#rulerOutput").textContent=`${e.target.value}%`;renderCanvas()};
+    $("#rulerHeight").oninput=e=>{state.targetHeightRatio=clamp(Number(e.target.value)/100,.05,state.rulerBottomRatio-.01);$("#rulerHeight").value=state.targetHeightRatio*100;$("#rulerOutput").textContent=`${Math.round(state.canvasHeight*state.targetHeightRatio)} px · ${Math.round(state.targetHeightRatio*100)}%`;renderCanvas()};
+    $("#rulerPosition").oninput=e=>{state.rulerBottomRatio=clamp(Number(e.target.value)/100,state.targetHeightRatio+.01,.99);$("#rulerPosition").value=state.rulerBottomRatio*100;$("#rulerPositionOutput").textContent=`${Math.round(state.rulerBottomRatio*100)}%`;renderCanvas()};
     $("#captureGuideBtn").onclick=captureGuides;$("#alignGuideBtn").onclick=alignSelectedToGuides;$("#fitAllGuideBtn").onclick=fitAllToGuides;
     $("#softness").oninput=e=>$("#softOutput").textContent=e.target.value;$("#removeBgBtn").onclick=()=>removeBackground(false);$("#removeBgAllBtn").onclick=()=>removeBackground(true);
     $("#enhanceBtn").onclick=()=>enhanceFrames(false);$("#enhanceAllBtn").onclick=()=>enhanceFrames(true);
@@ -620,8 +627,49 @@
     $$("[data-close]").forEach(b=>b.onclick=()=>$("#"+b.dataset.close).classList.add("hidden"));$("#exportColumns").oninput=updateExport;$("#exportResolution").onchange=updateExport;$("#exportSheetBtn").onclick=exportSheet;$("#exportFramesBtn").onclick=exportFrames;
     $$(".section-title").forEach(b=>b.onclick=()=>{const body=b.nextElementSibling;body.classList.toggle("hidden");b.lastElementChild.textContent=body.classList.contains("hidden")?"⌄":"⌃"});
     $("#projectName").oninput=e=>{state.projectName=e.target.value;$("#saveState").textContent="Unsaved changes"};
-    canvas.onpointerdown=e=>{const r=canvas.getBoundingClientRect(),p={x:(e.clientX-r.left)/r.width*state.canvasWidth,y:(e.clientY-r.top)/r.height*state.canvasHeight};if(state.tool==="guides"){commit();pointerDrag={kind:"guides"};state.anchorRatio=clamp(p.x/state.canvasWidth,.05,.95);state.groundRatio=clamp(p.y/state.canvasHeight,.5,.98);syncInputs();renderCanvas();canvas.setPointerCapture(e.pointerId);return}const f=selected();if(!f)return;commit();pointerDrag={kind:state.tool,p,x:f.x,y:f.y,b:{...f.charBounds}};canvas.setPointerCapture(e.pointerId)};
-    canvas.onpointermove=e=>{if(!pointerDrag)return;const r=canvas.getBoundingClientRect(),p={x:(e.clientX-r.left)/r.width*state.canvasWidth,y:(e.clientY-r.top)/r.height*state.canvasHeight};if(pointerDrag.kind==="guides"){state.anchorRatio=clamp(p.x/state.canvasWidth,.05,.95);state.groundRatio=clamp(p.y/state.canvasHeight,.5,.98);$("#anchorLine").value=state.anchorRatio*100;$("#anchorOutput").textContent=`${Math.round(state.anchorRatio*100)}%`;$("#groundLine").value=state.groundRatio*100;$("#groundOutput").textContent=`${Math.round(state.groundRatio*100)}%`;renderCanvas();return}const f=selected();if(!f)return;const dx=p.x-pointerDrag.p.x,dy=p.y-pointerDrag.p.y;if(pointerDrag.kind==="move"){f.x=pointerDrag.x+dx;f.y=pointerDrag.y+dy}else{f.charBounds.x=pointerDrag.b.x+dx/f.scale;f.charBounds.y=pointerDrag.b.y+dy/f.scale}renderInspector();renderCanvas()};canvas.onpointerup=()=>pointerDrag=null;
+    canvas.onpointerdown=e=>{
+      const r=canvas.getBoundingClientRect(),p={x:(e.clientX-r.left)/r.width*state.canvasWidth,y:(e.clientY-r.top)/r.height*state.canvasHeight};
+      if(state.tool==="guides"){
+        commit();
+        const rulerX=clamp(state.canvasWidth*state.anchorRatio-34,14,state.canvasWidth-14),rulerBottomY=state.canvasHeight*state.rulerBottomRatio,topY=rulerBottomY-state.canvasHeight*state.targetHeightRatio;
+        if(Math.abs(p.x-rulerX)<=20&&p.y>=topY-18&&p.y<=rulerBottomY+18){
+          const kind=Math.abs(p.y-topY)<=14?"rulerTop":Math.abs(p.y-rulerBottomY)<=14?"rulerBottom":"rulerMove";
+          pointerDrag={kind,p,startBottom:state.rulerBottomRatio,startHeight:state.targetHeightRatio};
+        }else{
+          pointerDrag={kind:"guides"};state.anchorRatio=clamp(p.x/state.canvasWidth,.05,.95);state.groundRatio=clamp(p.y/state.canvasHeight,.5,.98);
+        }
+        syncInputs();renderCanvas();canvas.setPointerCapture(e.pointerId);return;
+      }
+      const f=selected();if(!f)return;commit();pointerDrag={kind:state.tool,p,x:f.x,y:f.y,b:{...f.charBounds}};canvas.setPointerCapture(e.pointerId);
+    };
+    canvas.onpointermove=e=>{
+      if(!pointerDrag)return;
+      const r=canvas.getBoundingClientRect(),p={x:(e.clientX-r.left)/r.width*state.canvasWidth,y:(e.clientY-r.top)/r.height*state.canvasHeight};
+      if(pointerDrag.kind==="guides"){
+        state.anchorRatio=clamp(p.x/state.canvasWidth,.05,.95);state.groundRatio=clamp(p.y/state.canvasHeight,.5,.98);syncInputs();renderCanvas();return;
+      }
+      if(["rulerTop","rulerBottom","rulerMove"].includes(pointerDrag.kind)){
+        if(pointerDrag.kind==="rulerTop"){
+          state.targetHeightRatio=clamp(state.rulerBottomRatio-p.y/state.canvasHeight,.05,state.rulerBottomRatio-.01);
+        }else if(pointerDrag.kind==="rulerBottom"){
+          const fixedTop=pointerDrag.startBottom-pointerDrag.startHeight;
+          state.rulerBottomRatio=clamp(p.y/state.canvasHeight,fixedTop+.05,.99);
+          state.targetHeightRatio=state.rulerBottomRatio-fixedTop;
+        }else{
+          const delta=(p.y-pointerDrag.p.y)/state.canvasHeight;
+          state.rulerBottomRatio=clamp(pointerDrag.startBottom+delta,state.targetHeightRatio+.01,.99);
+        }
+        syncInputs();renderCanvas();status(`Scale ruler ${Math.round(state.canvasHeight*state.targetHeightRatio)} px`);return;
+      }
+      const f=selected();if(!f)return;const dx=p.x-pointerDrag.p.x,dy=p.y-pointerDrag.p.y;
+      if(pointerDrag.kind==="move"){f.x=pointerDrag.x+dx;f.y=pointerDrag.y+dy}else{f.charBounds.x=pointerDrag.b.x+dx/f.scale;f.charBounds.y=pointerDrag.b.y+dy/f.scale}
+      renderInspector();renderCanvas();
+    };
+    canvas.onpointerup=()=>{
+      if(pointerDrag&&["rulerTop","rulerBottom","rulerMove"].includes(pointerDrag.kind))toast(`Scale ruler: ${Math.round(state.canvasHeight*state.targetHeightRatio)} px`,"success");
+      pointerDrag=null;
+    };
+    canvas.onpointercancel=()=>pointerDrag=null;
     window.ondragover=e=>e.preventDefault();window.ondrop=e=>{e.preventDefault();const fs=[...e.dataTransfer.files].filter(f=>f.type.startsWith("image/"));if(fs.length===1)autoImport(fs[0]);else importFrames(fs)};
     window.onkeydown=e=>{
       const typing=["INPUT","TEXTAREA"].includes(document.activeElement?.tagName);

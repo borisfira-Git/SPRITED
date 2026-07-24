@@ -1,5 +1,13 @@
 # SPRITED version history
 
+## 0.6.4
+
+- Turned the vertical size ruler into a draggable scale-measurement tool.
+- The whole ruler can move up/down while preserving its measured height.
+- Top and bottom handles resize the ruler and show the exact pixel height.
+- Added a separate vertical-position slider and saved ruler position in project files.
+- Ruler changes support undo and can be captured from the selected frame.
+
 ## 0.6.3
 
 - Added arrow-key movement for the selected sprite frames in the editor.

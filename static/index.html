@@ -13,7 +13,7 @@
 <body>
 <div class="app-shell">
   <header class="topbar">
-    <div class="brand"><div class="brand-mark"><span></span><span></span><span></span><span></span></div><div class="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div><span class="version-badge">VER.0.6.3</span></div>
+    <div class="brand"><div class="brand-mark"><span></span><span></span><span></span><span></span></div><div class="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div><span class="version-badge">VER.0.6.4</span></div>
     <div class="project-title"><input id="projectName" value="Untitled Animation" aria-label="Project name"><span id="saveState">Local project</span></div>
     <nav class="toolbar">
       <button id="newBtn">＋ New</button><button id="openBtn">⌁ Open</button><button id="saveBtn">↓ Save</button><i></i>
@@ -39,7 +39,7 @@
         <div class="view-toggles"><button id="gridBtn" class="active">Grid</button><button id="groundBtn" class="active">Ground</button><button id="guidesBtn" class="active">Ruler</button><button id="boundsBtn" class="active">Bounds</button></div>
         <div class="zoom-tools"><button id="zoomOutBtn">−</button><button id="fitBtn">Fit</button><button id="zoomInBtn">＋</button></div>
       </div>
-      <div id="canvasStage" class="canvas-stage" title="Ctrl + wheel: zoom · Arrows: move · Shift + arrows: move 10px">
+      <div id="canvasStage" class="canvas-stage" title="Ctrl + wheel: zoom · Arrows: move · Anchor tool: drag the scale ruler">
         <div id="emptyState" class="empty-state">
           <div class="empty-art"><div class="mini-sheet"><i></i><i></i><i></i><i></i></div><b>✦</b></div>
           <h1>Build a clean animation</h1><p>Automatically detect frames, remove chroma green and start editing.</p>
@@ -77,9 +77,10 @@
         <button id="normalizeBtn" class="wide-action accent">Normalize all to reference</button>
       </div></section>
       <section class="property-section"><button class="section-title"><span>Anchor & Size Ruler</span><span>⌃</span></button><div class="section-body">
-        <p class="helper">Drag with the Anchor tool, or use these rulers. The orange body box is measured; aura and fire may extend outside it.</p>
+        <p class="helper">With the Anchor tool, drag the ruler body up/down or drag its top and bottom handles. The measured pixel height is your Scale reference.</p>
         <label class="range-field"><span>Anchor X <output id="anchorOutput">50%</output></span><input id="anchorLine" type="range" min="5" max="95" value="50"></label>
-        <label class="range-field"><span>Target body height <output id="rulerOutput">72%</output></span><input id="rulerHeight" type="range" min="10" max="95" value="72"></label>
+        <label class="range-field"><span>Scale ruler height <output id="rulerOutput">369 px · 72%</output></span><input id="rulerHeight" type="range" min="5" max="95" value="72"></label>
+        <label class="range-field"><span>Ruler vertical position <output id="rulerPositionOutput">88%</output></span><input id="rulerPosition" type="range" min="10" max="99" value="88"></label>
         <div class="button-grid"><button id="captureGuideBtn">Read selected frame</button><button id="alignGuideBtn">Align selected</button></div>
         <button id="fitAllGuideBtn" class="wide-action accent">Match all frames to ruler + anchor</button>
       </div></section>
