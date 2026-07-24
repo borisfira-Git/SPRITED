@@ -70,7 +70,7 @@
   function canvasBlob(c) { return new Promise((resolve) => c.toBlob(resolve, "image/png")); }
   async function alphaBounds(source) {
     const image = typeof source === "string" ? await loadImage(source) : source;
-    const c = document.createElement("canvas"); c.width = image.naturalWidth; c.height = image.naturalHeight;
+    const c = document.createElement("canvas"); c.width = image.naturalWidth || image.width; c.height = image.naturalHeight || image.height;
     const x = c.getContext("2d", { willReadFrequently: true }); x.drawImage(image, 0, 0);
     const data = x.getImageData(0, 0, c.width, c.height).data;
     let minX = c.width, minY = c.height, maxX = -1, maxY = -1;
@@ -90,6 +90,109 @@
       x: 0, y: 0, scale: 1, rotation: 0, duration: Math.round(1000 / state.fps),
       charBounds: { ...bounds }, alphaBounds: { ...bounds }
     };
+  }
+  function colorHex({ r, g, b }) {
+    return `#${[r,g,b].map((v) => clamp(Math.round(v),0,255).toString(16).padStart(2,"0")).join("")}`;
+  }
+  function sampleBackground(image) {
+    const c=document.createElement("canvas"),max=512,ratio=Math.min(max/image.naturalWidth,max/image.naturalHeight,1);
+    c.width=Math.max(1,Math.round(image.naturalWidth*ratio));c.height=Math.max(1,Math.round(image.naturalHeight*ratio));
+    const x=c.getContext("2d",{willReadFrequently:true});x.drawImage(image,0,0,c.width,c.height);
+    const d=x.getImageData(0,0,c.width,c.height).data,samples=[],step=Math.max(1,Math.floor(Math.min(c.width,c.height)/80));
+    for(let px=0;px<c.width;px+=step){samples.push(px,(c.height-1)*c.width+px)}
+    for(let py=0;py<c.height;py+=step){samples.push(py*c.width,py*c.width+c.width-1)}
+    const green=samples.map((p)=>({r:d[p*4],g:d[p*4+1],b:d[p*4+2]})).filter((v)=>v.g>v.r*1.05&&v.g>v.b*1.05);
+    const pool=green.length>samples.length*.35?green:samples.map((p)=>({r:d[p*4],g:d[p*4+1],b:d[p*4+2]}));
+    const median=(key)=>pool.map((v)=>v[key]).sort((a,b)=>a-b)[Math.floor(pool.length/2)]||0;
+    return {r:median("r"),g:median("g"),b:median("b")};
+  }
+  function isAutoBackground(d,i,key) {
+    if(d[i+3]<12)return true;
+    const r=d[i],g=d[i+1],b=d[i+2],dr=r-key.r,dg=g-key.g,db=b-key.b;
+    const dist=Math.sqrt(dr*dr+dg*dg+db*db),dominance=g-Math.max(r,b),keyIsGreen=key.g>key.r*1.08&&key.g>key.b*1.08;
+    return (keyIsGreen&&dist<68)||(g>48&&dominance>18&&g>r*1.1&&g>b*1.1);
+  }
+  function detectAutoGrid(image,key) {
+    const c=document.createElement("canvas"),max=720,ratio=Math.min(max/image.naturalWidth,max/image.naturalHeight,1);
+    c.width=Math.max(1,Math.round(image.naturalWidth*ratio));c.height=Math.max(1,Math.round(image.naturalHeight*ratio));
+    const x=c.getContext("2d",{willReadFrequently:true});x.drawImage(image,0,0,c.width,c.height);
+    const d=x.getImageData(0,0,c.width,c.height).data,w=c.width,h=c.height,integral=new Uint32Array((w+1)*(h+1));
+    for(let py=0;py<h;py++){let row=0;for(let px=0;px<w;px++){const fg=isAutoBackground(d,(py*w+px)*4,key)?0:1;row+=fg;integral[(py+1)*(w+1)+px+1]=integral[py*(w+1)+px+1]+row}}
+    const area=(x0,y0,x1,y1)=>integral[y1*(w+1)+x1]-integral[y0*(w+1)+x1]-integral[y1*(w+1)+x0]+integral[y0*(w+1)+x0];
+    let best={cols:2,rows:4,score:-Infinity};
+    for(let rows=1;rows<=8;rows++)for(let cols=1;cols<=8;cols++){
+      const count=rows*cols;if(count<2||count>32)continue;
+      const cellW=w/cols,cellH=h/rows,aspect=cellW/cellH;if(aspect<.25||aspect>4)continue;
+      const occupancies=[];let empty=0;
+      for(let r=0;r<rows;r++)for(let col=0;col<cols;col++){
+        const x0=Math.round(col*cellW),x1=Math.round((col+1)*cellW),y0=Math.round(r*cellH),y1=Math.round((r+1)*cellH);
+        const occ=area(x0,y0,x1,y1)/Math.max(1,(x1-x0)*(y1-y0));occupancies.push(occ);if(occ<.006)empty++;
+      }
+      let boundary=0,lines=0,strip=2;
+      for(let col=1;col<cols;col++){const px=Math.round(col*cellW);boundary+=area(Math.max(0,px-strip),0,Math.min(w,px+strip+1),h)/Math.max(1,(strip*2+1)*h);lines++}
+      for(let r=1;r<rows;r++){const py=Math.round(r*cellH);boundary+=area(0,Math.max(0,py-strip),w,Math.min(h,py+strip+1))/Math.max(1,(strip*2+1)*w);lines++}
+      boundary=lines?boundary/lines:1;
+      const mean=occupancies.reduce((a,b)=>a+b,0)/occupancies.length;
+      const spread=Math.sqrt(occupancies.reduce((a,b)=>a+(b-mean)*(b-mean),0)/occupancies.length);
+      const common=[8,12,16,6,10].includes(count)?.34:0;
+      const score=Math.log(count)*.82-boundary*13-empty*5-spread*1.4-Math.abs(Math.log(aspect))*.09+common;
+      if(score>best.score)best={cols,rows,score};
+    }
+    return best;
+  }
+  function removeChromaFromCanvas(c,key) {
+    const x=c.getContext("2d",{willReadFrequently:true}),id=x.getImageData(0,0,c.width,c.height),d=id.data;
+    const keyIsGreen=key.g>key.r*1.08&&key.g>key.b*1.08;
+    for(let i=0;i<d.length;i+=4){
+      const r=d[i],g=d[i+1],b=d[i+2],dr=r-key.r,dg=g-key.g,db=b-key.b,dist=Math.sqrt(dr*dr+dg*dg+db*db);
+      const dominance=g-Math.max(r,b),hueGreen=g>48&&g>r*1.08&&g>b*1.08;
+      const keyStrength=keyIsGreen?clamp((76-dist)/34,0,1):0,greenStrength=hueGreen?clamp((dominance-7)/25,0,1):0,strength=Math.max(keyStrength,greenStrength);
+      if(strength>.98)d[i+3]=0;
+      else if(strength>0){d[i+3]=Math.round(d[i+3]*(1-strength));d[i+1]=Math.round(g-(g-Math.max(r,b))*strength*.8)}
+    }
+    x.putImageData(id,0,0);
+  }
+  function removeDetachedLabels(c) {
+    const x=c.getContext("2d",{willReadFrequently:true}),id=x.getImageData(0,0,c.width,c.height),d=id.data,w=c.width,h=c.height;
+    if(w*h>3500000)return;
+    const labels=new Int32Array(w*h);labels.fill(-1);const queue=new Int32Array(w*h),parts=[];
+    for(let start=0;start<w*h;start++){
+      if(labels[start]!==-1||d[start*4+3]<20)continue;
+      const label=parts.length;let head=0,tail=0,area=0,minY=h,maxY=0;queue[tail++]=start;labels[start]=label;
+      while(head<tail){const p=queue[head++],px=p%w,py=(p/w)|0;area++;minY=Math.min(minY,py);maxY=Math.max(maxY,py);
+        if(px>0&&labels[p-1]===-1&&d[(p-1)*4+3]>=20){labels[p-1]=label;queue[tail++]=p-1}
+        if(px<w-1&&labels[p+1]===-1&&d[(p+1)*4+3]>=20){labels[p+1]=label;queue[tail++]=p+1}
+        if(py>0&&labels[p-w]===-1&&d[(p-w)*4+3]>=20){labels[p-w]=label;queue[tail++]=p-w}
+        if(py<h-1&&labels[p+w]===-1&&d[(p+w)*4+3]>=20){labels[p+w]=label;queue[tail++]=p+w}
+      }
+      parts.push({area,minY,maxY});
+    }
+    if(parts.length<2)return;
+    const main=parts.reduce((a,b)=>b.area>a.area?b:a,parts[0]),cutoff=main.maxY+Math.max(2,h*.008);
+    const remove=new Uint8Array(parts.length);
+    parts.forEach((part,i)=>{if(part.minY>cutoff&&part.area<main.area*.12)remove[i]=1});
+    for(let p=0;p<labels.length;p++)if(labels[p]>=0&&remove[labels[p]])d[p*4+3]=0;
+    x.putImageData(id,0,0);
+  }
+  async function autoImport(file) {
+    if(!file)return;
+    try{
+      status("Auto-detecting frames and chroma background…");
+      const src=await readDataUrl(file),image=await loadImage(src),key=sampleBackground(image),grid=detectAutoGrid(image,key);
+      commit();const created=[],cellW=Math.floor(image.naturalWidth/grid.cols),cellH=Math.floor(image.naturalHeight/grid.rows),base=file.name.replace(/\.[^.]+$/,"");
+      for(let r=0;r<grid.rows;r++)for(let col=0;col<grid.cols;col++){
+        const c=document.createElement("canvas");c.width=cellW;c.height=cellH;
+        c.getContext("2d").drawImage(image,col*cellW,r*cellH,cellW,cellH,0,0,cellW,cellH);
+        removeChromaFromCanvas(c,key);removeDetachedLabels(c);
+        const b=await alphaBounds(c);if(b.empty)continue;
+        const frame=await makeFrame(c.toDataURL("image/png"),`${base} ${String(created.length+1).padStart(2,"0")}`);
+        frame.scale=clamp(Math.min(state.canvasWidth*.94/cellW,state.canvasHeight*.94/cellH),.05,10);created.push(frame);
+      }
+      if(!created.length)throw new Error("No frames detected");
+      state.frames.push(...created);state.selectedId=created[0].id;state.selectedIds=[created[0].id];state.selectionAnchorId=created[0].id;state.referenceId ||= created[0].id;
+      $("#bgColor").value=colorHex(key);images.clear();renderAll();fitZoom();status("Auto import complete");
+      toast(`Auto Import: ${created.length} frames · ${grid.cols} × ${grid.rows} · background removed`,"success");
+    }catch(error){status("Ready");toast("Automatic import could not read this sheet. Try Manual Grid.","error")}
   }
   function drawRect(frame) {
     const w = frame.sourceWidth * frame.scale, h = frame.sourceHeight * frame.scale;
@@ -201,14 +304,22 @@
     if (!f) return;
     $("#propX").value = Math.round(f.x*100)/100; $("#propY").value = Math.round(f.y*100)/100;
     $("#propScale").value = Math.round(f.scale*1000)/1000; $("#propRotation").value = f.rotation;
+    $("#propScaleRange").value = clamp(Math.round(f.scale*100),5,400); $("#propScaleOutput").textContent = `${Math.round(f.scale*100)}%`;
     $("#boundX").value = Math.round(f.charBounds.x); $("#boundY").value = Math.round(f.charBounds.y);
     $("#boundW").value = Math.round(f.charBounds.w); $("#boundH").value = Math.round(f.charBounds.h);
     $("#durationInput").value = f.duration; $("#matchBtn").disabled = !reference() || reference().id === f.id;
   }
+  function exportFrameSize() {
+    const value=$("#exportResolution").value;
+    if(value==="current")return{w:state.canvasWidth,h:state.canvasHeight,label:"current"};
+    const w=clamp(Number(value)||state.canvasWidth,16,4096),h=Math.max(1,Math.round(w*state.canvasHeight/state.canvasWidth));
+    return{w,h,label:value};
+  }
   function updateExport() {
     const columns = clamp(Number($("#exportColumns").value)||1,1,Math.max(1,state.frames.length)), rows = Math.ceil(state.frames.length/columns);
+    const size=exportFrameSize();
     $("#exportSummary").textContent = `${state.frames.length} frames · ${columns} × ${rows} grid`;
-    $("#exportDimensions").textContent = state.frames.length ? `${state.canvasWidth*columns} × ${state.canvasHeight*rows} px · transparent PNG` : "Add frames before exporting";
+    $("#exportDimensions").textContent = state.frames.length ? `${size.w*columns} × ${size.h*rows} px · ${size.w} × ${size.h} per frame · transparent PNG` : "Add frames before exporting";
   }
   function renderAll() { renderFrames(); renderInspector(); renderCanvas(); updateExport(); updateHistory(); }
   function syncInputs() {
@@ -293,18 +404,24 @@
   function stop(){state.playing=false;clearTimeout(playTimer);$("#playBtn").textContent="▶"}
   function play(){if(!state.frames.length)return;state.playing=!state.playing;$("#playBtn").textContent=state.playing?"Ⅱ":"▶";if(state.playing)playStep();else stop()}
   function playStep(){if(!state.playing)return;const f=selected()||state.frames[0];playTimer=setTimeout(()=>{const i=state.frames.indexOf(f);if(!state.loop&&i===state.frames.length-1)return stop();step(1);playStep()},f.duration||1000/state.fps)}
-  async function renderedFrame(f){const c=document.createElement("canvas");c.width=state.canvasWidth;c.height=state.canvasHeight;await drawFrame(c.getContext("2d"),f,false);return c}
+  async function renderedFrame(f,size={w:state.canvasWidth,h:state.canvasHeight}){
+    const base=document.createElement("canvas");base.width=state.canvasWidth;base.height=state.canvasHeight;await drawFrame(base.getContext("2d"),f,false);
+    if(size.w===state.canvasWidth&&size.h===state.canvasHeight)return base;
+    const out=document.createElement("canvas");out.width=size.w;out.height=size.h;const x=out.getContext("2d");x.imageSmoothingEnabled=true;x.imageSmoothingQuality="high";x.drawImage(base,0,0,size.w,size.h);return out;
+  }
   function prefix(){return($("#exportPrefix").value||state.projectName||"animation").trim().replace(/[^\w-]+/g,"_").replace(/^_+|_+$/g,"").toLowerCase()||"animation"}
-  function metadata(cols){return{animation:prefix(),fps:state.fps,loop:state.loop,frame_width:state.canvasWidth,frame_height:state.canvasHeight,frames:state.frames.length,horizontal_frames:Math.min(cols,state.frames.length),vertical_frames:Math.ceil(state.frames.length/cols),durations_ms:state.frames.map(f=>f.duration),reference_frame:Math.max(0,state.frames.findIndex(f=>f.id===state.referenceId))}}
-  async function exportSheet(){if(!state.frames.length)return;const cols=clamp(Number($("#exportColumns").value)||1,1,state.frames.length),rows=Math.ceil(state.frames.length/cols),c=document.createElement("canvas");c.width=state.canvasWidth*cols;c.height=state.canvasHeight*rows;const x=c.getContext("2d");status("Rendering sprite sheet…");for(let i=0;i<state.frames.length;i++)x.drawImage(await renderedFrame(state.frames[i]),i%cols*state.canvasWidth,Math.floor(i/cols)*state.canvasHeight);download(await canvasBlob(c),`${prefix()}_${cols}x${rows}.png`);download(new Blob([JSON.stringify(metadata(cols),null,2)],{type:"application/json"}),`${prefix()}.json`);$("#exportModal").classList.add("hidden");status("Sprite sheet exported");toast(`Exported ${c.width} × ${c.height} sprite sheet`,"success")}
-  async function exportFrames(){if(!state.frames.length)return;let dir=null;if(window.showDirectoryPicker){try{dir=await window.showDirectoryPicker({mode:"readwrite"})}catch{return}}for(let i=0;i<state.frames.length;i++){const blob=await canvasBlob(await renderedFrame(state.frames[i])),name=`${prefix()}_${String(i+1).padStart(3,"0")}.png`;if(dir){const h=await dir.getFileHandle(name,{create:true}),w=await h.createWritable();await w.write(blob);await w.close()}else{download(blob,name);await new Promise(r=>setTimeout(r,80))}}toast(`${state.frames.length} frames exported`,"success");$("#exportModal").classList.add("hidden")}
+  function metadata(cols,size){return{animation:prefix(),fps:state.fps,loop:state.loop,frame_width:size.w,frame_height:size.h,frames:state.frames.length,horizontal_frames:Math.min(cols,state.frames.length),vertical_frames:Math.ceil(state.frames.length/cols),durations_ms:state.frames.map(f=>f.duration),reference_frame:Math.max(0,state.frames.findIndex(f=>f.id===state.referenceId))}}
+  async function exportSheet(){if(!state.frames.length)return;const cols=clamp(Number($("#exportColumns").value)||1,1,state.frames.length),rows=Math.ceil(state.frames.length/cols),size=exportFrameSize(),c=document.createElement("canvas");c.width=size.w*cols;c.height=size.h*rows;const x=c.getContext("2d");x.imageSmoothingEnabled=true;x.imageSmoothingQuality="high";status("Rendering high-quality sprite sheet…");for(let i=0;i<state.frames.length;i++)x.drawImage(await renderedFrame(state.frames[i],size),i%cols*size.w,Math.floor(i/cols)*size.h);download(await canvasBlob(c),`${prefix()}_${size.w}px_${cols}x${rows}.png`);download(new Blob([JSON.stringify(metadata(cols,size),null,2)],{type:"application/json"}),`${prefix()}.json`);$("#exportModal").classList.add("hidden");status("Sprite sheet exported");toast(`Exported ${c.width} × ${c.height} sprite sheet`,"success")}
+  async function exportFrames(){if(!state.frames.length)return;const size=exportFrameSize();let dir=null;if(window.showDirectoryPicker){try{dir=await window.showDirectoryPicker({mode:"readwrite"})}catch{return}}for(let i=0;i<state.frames.length;i++){const blob=await canvasBlob(await renderedFrame(state.frames[i],size)),name=`${prefix()}_${size.w}px_${String(i+1).padStart(3,"0")}.png`;if(dir){const h=await dir.getFileHandle(name,{create:true}),w=await h.createWritable();await w.write(blob);await w.close()}else{download(blob,name);await new Promise(r=>setTimeout(r,80))}}toast(`${state.frames.length} frames exported at ${size.w} × ${size.h}`,"success");$("#exportModal").classList.add("hidden")}
   function saveProject(){state.projectName=$("#projectName").value.trim()||"Untitled Animation";download(new Blob([JSON.stringify(snapshot())],{type:"application/json"}),`${state.projectName.replace(/[^\w-]+/g,"_").toLowerCase()}.spriteproject`);$("#saveState").textContent="Saved locally";toast("Project saved","success")}
   async function openProject(file){try{const data=JSON.parse(await file.text());if(!Array.isArray(data.frames))throw Error();state.history=[];state.future=[];restore(data);$("#saveState").textContent="Saved locally";toast("Project opened","success")}catch{toast("Could not open this project","error")}}
   function fitZoom(){const r=$("#canvasStage").getBoundingClientRect();state.zoom=clamp(Math.min((r.width-90)/state.canvasWidth,(r.height-90)/state.canvasHeight),.1,2);renderCanvas()}
   function bindNumber(id,cb){$(id).onchange=e=>{const v=Number(e.target.value);if(Number.isFinite(v))cb(v)}}
   function bind() {
+    $("#autoBtn").onclick=$("#emptyAutoBtn").onclick=()=>$("#autoInput").click();
     $("#sheetBtn").onclick=$("#emptySheetBtn").onclick=()=>$("#sheetInput").click();
     $("#framesBtn").onclick=$("#emptyFramesBtn").onclick=$("#addFramesBtn").onclick=()=>$("#framesInput").click();
+    $("#autoInput").onchange=e=>{autoImport(e.target.files[0]);e.target.value=""};
     $("#sheetInput").onchange=e=>{openSlicer(e.target.files[0]);e.target.value=""};$("#framesInput").onchange=e=>{importFrames(e.target.files);e.target.value=""};
     $("#openBtn").onclick=()=>$("#projectInput").click();$("#projectInput").onchange=e=>{if(e.target.files[0])openProject(e.target.files[0]);e.target.value=""};
     $("#saveBtn").onclick=saveProject;$("#newBtn").onclick=()=>{if(state.frames.length&&!confirm("Start a new project? Unsaved work will be cleared."))return;restore({version:1,projectName:"Untitled Animation",frames:[],selectedId:null,referenceId:null,canvasWidth:512,canvasHeight:512,groundRatio:.88,fps:12,loop:true});state.history=[];state.future=[]};
@@ -314,6 +431,8 @@
     $("#duplicateBtn").onclick=()=>{const f=selected();if(!f)return;commit();const copy={...f,id:uid(),name:`${f.name} copy`,charBounds:{...f.charBounds},alphaBounds:{...f.alphaBounds}},i=state.frames.indexOf(f);state.frames.splice(i+1,0,copy);state.selectedId=copy.id;renderAll()};
     $("#deleteBtn").onclick=deleteSelection;
     bindNumber("#propX",v=>{const f=selected();commit();f.x=v;renderAll()});bindNumber("#propY",v=>{const f=selected();commit();f.y=v;renderAll()});bindNumber("#propScale",v=>{const f=selected();commit();f.scale=clamp(v,.05,10);renderAll()});bindNumber("#propRotation",v=>{const f=selected();commit();f.rotation=v;renderAll()});
+    $("#propScaleRange").onpointerdown=()=>{if(selected())commit()};$("#propScaleRange").onkeydown=e=>{if(["ArrowLeft","ArrowRight","Home","End","PageUp","PageDown"].includes(e.key)&&selected())commit()};$("#propScaleRange").oninput=e=>{const f=selected();if(!f)return;f.scale=clamp(Number(e.target.value)/100,.05,4);$("#propScale").value=Math.round(f.scale*1000)/1000;$("#propScaleOutput").textContent=`${Math.round(f.scale*100)}%`;renderCanvas()};
+    $("#scaleDownBtn").onclick=()=>{const f=selected();if(!f)return;commit();f.scale=clamp(f.scale*.9,.05,10);renderAll()};$("#scaleResetBtn").onclick=()=>{const f=selected();if(!f)return;commit();f.scale=1;renderAll()};$("#scaleUpBtn").onclick=()=>{const f=selected();if(!f)return;commit();f.scale=clamp(f.scale*1.1,.05,10);renderAll()};
     [["#boundX","x"],["#boundY","y"],["#boundW","w"],["#boundH","h"]].forEach(([id,key])=>bindNumber(id,v=>{const f=selected();commit();f.charBounds[key]=["w","h"].includes(key)?Math.max(1,v):v;renderAll()}));
     bindNumber("#durationInput",v=>{const f=selected();commit();f.duration=Math.max(10,v);renderAll()});
     $("#centerBtn").onclick=()=>{const f=selected();commit();Object.assign(f,centerPatch(f));renderAll()};$("#alignBtn").onclick=()=>{const f=selected();commit();Object.assign(f,groundPatch(f));renderAll()};
@@ -328,7 +447,7 @@
     $$("[data-tool]").forEach(b=>b.onclick=()=>{state.tool=b.dataset.tool;$$("[data-tool]").forEach(x=>x.classList.toggle("active",x===b))});
     $("#zoomInBtn").onclick=()=>{state.zoom=clamp(state.zoom+.1,.1,4);renderCanvas()};$("#zoomOutBtn").onclick=()=>{state.zoom=clamp(state.zoom-.1,.1,4);renderCanvas()};$("#fitBtn").onclick=fitZoom;
     ["#sliceCols","#sliceRows","#sliceGapX","#sliceGapY","#sliceMarginX","#sliceMarginY"].forEach(id=>$(id).oninput=renderSlice);$("#confirmSliceBtn").onclick=confirmSlice;
-    $$("[data-close]").forEach(b=>b.onclick=()=>$("#"+b.dataset.close).classList.add("hidden"));$("#exportColumns").oninput=updateExport;$("#exportSheetBtn").onclick=exportSheet;$("#exportFramesBtn").onclick=exportFrames;
+    $$("[data-close]").forEach(b=>b.onclick=()=>$("#"+b.dataset.close).classList.add("hidden"));$("#exportColumns").oninput=updateExport;$("#exportResolution").onchange=updateExport;$("#exportSheetBtn").onclick=exportSheet;$("#exportFramesBtn").onclick=exportFrames;
     $$(".section-title").forEach(b=>b.onclick=()=>{const body=b.nextElementSibling;body.classList.toggle("hidden");b.lastElementChild.textContent=body.classList.contains("hidden")?"⌄":"⌃"});
     $("#projectName").oninput=e=>{state.projectName=e.target.value;$("#saveState").textContent="Unsaved changes"};
     canvas.onpointerdown=e=>{const f=selected();if(!f)return;commit();const r=canvas.getBoundingClientRect(),p={x:(e.clientX-r.left)/r.width*state.canvasWidth,y:(e.clientY-r.top)/r.height*state.canvasHeight};pointerDrag={p,x:f.x,y:f.y,b:{...f.charBounds}};canvas.setPointerCapture(e.pointerId)};
