@@ -35,8 +35,8 @@
     </aside>
     <section class="editor-area">
       <div class="editor-toolbar">
-        <div class="segmented"><button class="active" data-tool="move">Move</button><button data-tool="bounds">Character Box</button></div>
-        <div class="view-toggles"><button id="gridBtn" class="active">Grid</button><button id="groundBtn" class="active">Ground</button><button id="boundsBtn" class="active">Bounds</button></div>
+        <div class="segmented"><button class="active" data-tool="move">Move</button><button data-tool="bounds">Character Box</button><button data-tool="guides">Anchor</button></div>
+        <div class="view-toggles"><button id="gridBtn" class="active">Grid</button><button id="groundBtn" class="active">Ground</button><button id="guidesBtn" class="active">Ruler</button><button id="boundsBtn" class="active">Bounds</button></div>
         <div class="zoom-tools"><button id="zoomOutBtn">−</button><button id="fitBtn">Fit</button><button id="zoomInBtn">＋</button></div>
       </div>
       <div id="canvasStage" class="canvas-stage">
@@ -76,10 +76,22 @@
         <label class="range-field"><span>Ground line <output id="groundOutput">88%</output></span><input id="groundLine" type="range" min="50" max="98" value="88"></label>
         <button id="normalizeBtn" class="wide-action accent">Normalize all to reference</button>
       </div></section>
+      <section class="property-section"><button class="section-title"><span>Anchor & Size Ruler</span><span>⌃</span></button><div class="section-body">
+        <p class="helper">Drag with the Anchor tool, or use these rulers. The orange body box is measured; aura and fire may extend outside it.</p>
+        <label class="range-field"><span>Anchor X <output id="anchorOutput">50%</output></span><input id="anchorLine" type="range" min="5" max="95" value="50"></label>
+        <label class="range-field"><span>Target body height <output id="rulerOutput">72%</output></span><input id="rulerHeight" type="range" min="10" max="95" value="72"></label>
+        <div class="button-grid"><button id="captureGuideBtn">Read selected frame</button><button id="alignGuideBtn">Align selected</button></div>
+        <button id="fitAllGuideBtn" class="wide-action accent">Match all frames to ruler + anchor</button>
+      </div></section>
       <section class="property-section"><button class="section-title"><span>Background Removal</span><span>⌃</span></button><div class="section-body">
         <div class="color-row"><label>Color<input id="bgColor" type="color" value="#00ff00"></label><label>Tolerance<input id="tolerance" type="number" value="52"></label></div>
         <label class="range-field"><span>Edge softness <output id="softOutput">12</output></span><input id="softness" type="range" min="0" max="80" value="12"></label>
         <button id="removeBgBtn" class="wide-action">Remove from selected</button><button id="removeBgAllBtn" class="wide-action subtle">Remove from all frames</button>
+      </div></section>
+      <section class="property-section"><button class="section-title"><span>Visual Enhancement</span><span>⌃</span></button><div class="section-body">
+        <p class="helper">High-quality local upscale, edge cleanup and light sharpening. Undo is available with Ctrl+Z.</p>
+        <label>Enhancement mode<select id="enhanceMode"><option value="anime">Anime Smooth</option><option value="pixel">Pixel Art — crisp pixels</option></select></label>
+        <div class="button-grid"><button id="enhanceBtn">Enhance selected</button><button id="enhanceAllBtn">Enhance all</button></div>
       </div></section>
     </aside>
   </main>

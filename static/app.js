@@ -7,8 +7,8 @@
   const images = new Map();
   const state = {
     projectName: "Untitled Animation", frames: [], selectedId: null, selectedIds: [], selectionAnchorId: null, referenceId: null,
-    canvasWidth: 512, canvasHeight: 512, groundRatio: .88, fps: 12, loop: true,
-    playing: false, zoom: 1, tool: "move", grid: true, ground: true, bounds: true,
+    canvasWidth: 512, canvasHeight: 512, groundRatio: .88, anchorRatio: .5, targetHeightRatio: .72, fps: 12, loop: true,
+    playing: false, zoom: 1, tool: "move", grid: true, ground: true, guides: true, bounds: true,
     sliceImage: null, sliceName: "", history: [], future: []
   };
   const canvas = $("#editorCanvas");
@@ -35,7 +35,8 @@
       frames: state.frames.map((f) => ({ ...f, charBounds: { ...f.charBounds }, alphaBounds: { ...f.alphaBounds } })),
       selectedId: state.selectedId, selectedIds: [...state.selectedIds], selectionAnchorId: state.selectionAnchorId,
       referenceId: state.referenceId, canvasWidth: state.canvasWidth,
-      canvasHeight: state.canvasHeight, groundRatio: state.groundRatio, fps: state.fps, loop: state.loop
+      canvasHeight: state.canvasHeight, groundRatio: state.groundRatio, anchorRatio: state.anchorRatio,
+      targetHeightRatio: state.targetHeightRatio, fps: state.fps, loop: state.loop
     };
   }
   function restore(data) {
@@ -43,6 +44,8 @@
       frames: data.frames || [],
       selectedIds: data.selectedIds?.length ? data.selectedIds : (data.selectedId ? [data.selectedId] : []),
       selectionAnchorId: data.selectionAnchorId || data.selectedId || null,
+      anchorRatio: data.anchorRatio ?? .5,
+      targetHeightRatio: data.targetHeightRatio ?? .72,
       playing: false
     });
     images.clear(); syncInputs(); renderAll();
@@ -152,46 +155,103 @@
     }
     x.putImageData(id,0,0);
   }
-  function removeDetachedLabels(c) {
+  function analyzeObjects(c) {
     const x=c.getContext("2d",{willReadFrequently:true}),id=x.getImageData(0,0,c.width,c.height),d=id.data,w=c.width,h=c.height;
-    if(w*h>3500000)return;
     const labels=new Int32Array(w*h);labels.fill(-1);const queue=new Int32Array(w*h),parts=[];
     for(let start=0;start<w*h;start++){
-      if(labels[start]!==-1||d[start*4+3]<20)continue;
-      const label=parts.length;let head=0,tail=0,area=0,minY=h,maxY=0;queue[tail++]=start;labels[start]=label;
-      while(head<tail){const p=queue[head++],px=p%w,py=(p/w)|0;area++;minY=Math.min(minY,py);maxY=Math.max(maxY,py);
-        if(px>0&&labels[p-1]===-1&&d[(p-1)*4+3]>=20){labels[p-1]=label;queue[tail++]=p-1}
-        if(px<w-1&&labels[p+1]===-1&&d[(p+1)*4+3]>=20){labels[p+1]=label;queue[tail++]=p+1}
-        if(py>0&&labels[p-w]===-1&&d[(p-w)*4+3]>=20){labels[p-w]=label;queue[tail++]=p-w}
-        if(py<h-1&&labels[p+w]===-1&&d[(p+w)*4+3]>=20){labels[p+w]=label;queue[tail++]=p+w}
+      if(labels[start]!==-1||d[start*4+3]<18)continue;
+      const label=parts.length;let head=0,tail=0,area=0,minX=w,minY=h,maxX=0,maxY=0,sumX=0,sumY=0,white=0;
+      queue[tail++]=start;labels[start]=label;
+      while(head<tail){
+        const p=queue[head++],px=p%w,py=(p/w)|0,di=p*4;area++;minX=Math.min(minX,px);minY=Math.min(minY,py);maxX=Math.max(maxX,px);maxY=Math.max(maxY,py);sumX+=px;sumY+=py;
+        if(d[di]>165&&d[di+1]>165&&d[di+2]>165&&Math.max(d[di],d[di+1],d[di+2])-Math.min(d[di],d[di+1],d[di+2])<65)white++;
+        if(px>0&&labels[p-1]===-1&&d[(p-1)*4+3]>=18){labels[p-1]=label;queue[tail++]=p-1}
+        if(px<w-1&&labels[p+1]===-1&&d[(p+1)*4+3]>=18){labels[p+1]=label;queue[tail++]=p+1}
+        if(py>0&&labels[p-w]===-1&&d[(p-w)*4+3]>=18){labels[p-w]=label;queue[tail++]=p-w}
+        if(py<h-1&&labels[p+w]===-1&&d[(p+w)*4+3]>=18){labels[p+w]=label;queue[tail++]=p+w}
       }
-      parts.push({area,minY,maxY});
+      parts.push({id:label,area,minX,minY,maxX,maxY,cx:sumX/area,cy:sumY/area,whiteRatio:white/area});
     }
-    if(parts.length<2)return;
-    const main=parts.reduce((a,b)=>b.area>a.area?b:a,parts[0]),cutoff=main.maxY+Math.max(2,h*.008);
-    const remove=new Uint8Array(parts.length);
-    parts.forEach((part,i)=>{if(part.minY>cutoff&&part.area<main.area*.12)remove[i]=1});
-    for(let p=0;p<labels.length;p++)if(labels[p]>=0&&remove[labels[p]])d[p*4+3]=0;
-    x.putImageData(id,0,0);
+    return{x,id,d,w,h,labels,parts};
+  }
+  function extractObjectFrames(c,grid) {
+    const analysis=analyzeObjects(c),{x,id,d,w,h,labels}=analysis,sorted=[...analysis.parts].sort((a,b)=>b.area-a.area);
+    if(!sorted.length)return[];
+    const expected=Math.min(grid.cols*grid.rows,32),cellW=w/Math.max(1,grid.cols),cellH=h/Math.max(1,grid.rows);
+    const minSeed=Math.max(80,w*h*.00045,sorted[0].area*.012),candidates=sorted.filter((part)=>part.area>=minSeed),seeds=[];
+    for(const part of candidates){
+      if(seeds.every((seed)=>Math.abs(seed.cx-part.cx)>cellW*.31||Math.abs(seed.cy-part.cy)>cellH*.31))seeds.push(part);
+      if(seeds.length===expected)break;
+    }
+    if(seeds.length<expected)for(const part of candidates){
+      if(!seeds.includes(part)&&seeds.every((seed)=>Math.abs(seed.cx-part.cx)>cellW*.15||Math.abs(seed.cy-part.cy)>cellH*.15))seeds.push(part);
+      if(seeds.length===expected)break;
+    }
+    if(!seeds.length)return[];
+    const rowOrdered=[...seeds].sort((a,b)=>a.cy-b.cy),ordered=[];
+    for(let i=0;i<rowOrdered.length;i+=grid.cols)ordered.push(...rowOrdered.slice(i,i+grid.cols).sort((a,b)=>a.cx-b.cx));
+    const groups=ordered.map((seed)=>({seed,parts:[seed]}));
+    for(const part of analysis.parts){
+      if(ordered.includes(part))continue;
+      let best=null,bestDistance=Infinity;
+      groups.forEach((group)=>{
+        const dx=(part.cx-group.seed.cx)/Math.max(1,cellW),dy=(part.cy-group.seed.cy)/Math.max(1,cellH),distance=Math.sqrt(dx*dx+dy*dy);
+        if(distance<bestDistance){bestDistance=distance;best=group}
+      });
+      if(!best||bestDistance>.78)continue;
+      const likelyLabel=part.area<best.seed.area*.09&&part.whiteRatio>.42&&part.cy>best.seed.cy+cellH*.2;
+      if(!likelyLabel)best.parts.push(part);
+    }
+    const padding=Math.max(3,Math.round(Math.min(cellW,cellH)*.025)),objects=[];
+    for(const group of groups){
+      const minX=Math.max(0,Math.min(...group.parts.map((part)=>part.minX))-padding),minY=Math.max(0,Math.min(...group.parts.map((part)=>part.minY))-padding);
+      const maxX=Math.min(w-1,Math.max(...group.parts.map((part)=>part.maxX))+padding),maxY=Math.min(h-1,Math.max(...group.parts.map((part)=>part.maxY))+padding);
+      const out=document.createElement("canvas");out.width=maxX-minX+1;out.height=maxY-minY+1;const ox=out.getContext("2d"),outId=ox.createImageData(out.width,out.height),allowed=new Uint8Array(analysis.parts.length);
+      group.parts.forEach((part)=>allowed[part.id]=1);
+      for(let py=minY;py<=maxY;py++)for(let px=minX;px<=maxX;px++){
+        const sourcePixel=py*w+px,label=labels[sourcePixel];if(label<0||!allowed[label])continue;
+        const si=sourcePixel*4,di=((py-minY)*out.width+(px-minX))*4;outId.data[di]=d[si];outId.data[di+1]=d[si+1];outId.data[di+2]=d[si+2];outId.data[di+3]=d[si+3];
+      }
+      ox.putImageData(outId,0,0);objects.push(out);
+    }
+    return objects;
+  }
+  function detectBodyBounds(c) {
+    const x=c.getContext("2d",{willReadFrequently:true}),d=x.getImageData(0,0,c.width,c.height).data,w=c.width,h=c.height,labels=new Int32Array(w*h),queue=new Int32Array(w*h),parts=[];
+    labels.fill(-1);
+    const bodyPixel=(p)=>{const i=p*4,r=d[i],g=d[i+1],b=d[i+2];return d[i+3]>=20&&!(r>125&&r>g*1.3&&r>b*1.16)};
+    for(let start=0;start<w*h;start++){
+      if(labels[start]!==-1||!bodyPixel(start))continue;
+      const label=parts.length;let head=0,tail=0,area=0,minX=w,minY=h,maxX=0,maxY=0;queue[tail++]=start;labels[start]=label;
+      while(head<tail){const p=queue[head++],px=p%w,py=(p/w)|0;area++;minX=Math.min(minX,px);minY=Math.min(minY,py);maxX=Math.max(maxX,px);maxY=Math.max(maxY,py);
+        if(px>0&&labels[p-1]===-1&&bodyPixel(p-1)){labels[p-1]=label;queue[tail++]=p-1}
+        if(px<w-1&&labels[p+1]===-1&&bodyPixel(p+1)){labels[p+1]=label;queue[tail++]=p+1}
+        if(py>0&&labels[p-w]===-1&&bodyPixel(p-w)){labels[p-w]=label;queue[tail++]=p-w}
+        if(py<h-1&&labels[p+w]===-1&&bodyPixel(p+w)){labels[p+w]=label;queue[tail++]=p+w}
+      }
+      parts.push({area,minX,minY,maxX,maxY});
+    }
+    if(!parts.length)return{x:0,y:0,w,h};
+    const body=parts.reduce((a,b)=>b.area>a.area?b:a,parts[0]),pad=Math.max(2,Math.round(Math.max(body.maxX-body.minX,body.maxY-body.minY)*.035));
+    const minX=Math.max(0,body.minX-pad),minY=Math.max(0,body.minY-pad),maxX=Math.min(w-1,body.maxX+pad),maxY=Math.min(h-1,body.maxY+pad);
+    return{x:minX,y:minY,w:maxX-minX+1,h:maxY-minY+1};
   }
   async function autoImport(file) {
     if(!file)return;
     try{
-      status("Auto-detecting frames and chroma background…");
+      status("Removing background and detecting complete sprite objects…");
       const src=await readDataUrl(file),image=await loadImage(src),key=sampleBackground(image),grid=detectAutoGrid(image,key);
-      commit();const created=[],cellW=Math.floor(image.naturalWidth/grid.cols),cellH=Math.floor(image.naturalHeight/grid.rows),base=file.name.replace(/\.[^.]+$/,"");
-      for(let r=0;r<grid.rows;r++)for(let col=0;col<grid.cols;col++){
-        const c=document.createElement("canvas");c.width=cellW;c.height=cellH;
-        c.getContext("2d").drawImage(image,col*cellW,r*cellH,cellW,cellH,0,0,cellW,cellH);
-        removeChromaFromCanvas(c,key);removeDetachedLabels(c);
-        const b=await alphaBounds(c);if(b.empty)continue;
-        const frame=await makeFrame(c.toDataURL("image/png"),`${base} ${String(created.length+1).padStart(2,"0")}`);
-        frame.scale=clamp(Math.min(state.canvasWidth*.94/cellW,state.canvasHeight*.94/cellH),.05,10);created.push(frame);
-      }
+      const full=document.createElement("canvas");full.width=image.naturalWidth;full.height=image.naturalHeight;full.getContext("2d").drawImage(image,0,0);removeChromaFromCanvas(full,key);
+      const objects=extractObjectFrames(full,grid);commit();const created=[],base=file.name.replace(/\.[^.]+$/,"");
+      for(const object of objects){const bodyBounds=detectBodyBounds(object),frame=await makeFrame(object.toDataURL("image/png"),`${base} ${String(created.length+1).padStart(2,"0")}`);frame.charBounds=bodyBounds;created.push(frame)}
       if(!created.length)throw new Error("No frames detected");
+      const requestedBodyHeight=state.canvasHeight*state.targetHeightRatio;
+      const safeBodyHeight=Math.min(...created.map((frame)=>Math.min(state.canvasWidth*.9*frame.charBounds.h/Math.max(1,frame.alphaBounds.w),state.canvasHeight*.9*frame.charBounds.h/Math.max(1,frame.alphaBounds.h))));
+      const bodyHeight=clamp(Math.min(requestedBodyHeight,safeBodyHeight),state.canvasHeight*.15,state.canvasHeight*.95);state.targetHeightRatio=bodyHeight/state.canvasHeight;
+      created.forEach((frame)=>{frame.scale=clamp(bodyHeight/Math.max(1,frame.charBounds.h),.05,10);Object.assign(frame,centerPatch(frame));Object.assign(frame,groundPatch(frame))});
       state.frames.push(...created);state.selectedId=created[0].id;state.selectedIds=[created[0].id];state.selectionAnchorId=created[0].id;state.referenceId ||= created[0].id;
-      $("#bgColor").value=colorHex(key);images.clear();renderAll();fitZoom();status("Auto import complete");
-      toast(`Auto Import: ${created.length} frames · ${grid.cols} × ${grid.rows} · background removed`,"success");
+      $("#bgColor").value=colorHex(key);images.clear();syncInputs();renderAll();fitZoom();status("Auto import complete");
+      toast(`Auto Import: ${created.length} complete objects · background removed · arranged ${grid.cols} × ${grid.rows}`,"success");
     }catch(error){status("Ready");toast("Automatic import could not read this sheet. Try Manual Grid.","error")}
   }
   function drawRect(frame) {
@@ -220,6 +280,13 @@
       const y = state.canvasHeight * state.groundRatio;
       target.setLineDash([]); target.strokeStyle = "#57d99b"; target.beginPath(); target.moveTo(0, y); target.lineTo(state.canvasWidth, y); target.stroke();
       target.fillStyle = "#57d99b"; target.font = "11px system-ui"; target.fillText("GROUND", 8, y - 7);
+    }
+    if (state.guides) {
+      const ax=state.canvasWidth*state.anchorRatio,groundY=state.canvasHeight*state.groundRatio,topY=groundY-state.canvasHeight*state.targetHeightRatio,rulerX=clamp(ax-34,14,state.canvasWidth-14);
+      target.setLineDash([4,5]);target.strokeStyle="rgba(102,196,255,.8)";target.lineWidth=1;target.beginPath();target.moveTo(ax,0);target.lineTo(ax,state.canvasHeight);target.stroke();
+      target.setLineDash([]);target.strokeStyle="#66c4ff";target.lineWidth=2;target.beginPath();target.moveTo(rulerX,topY);target.lineTo(rulerX,groundY);target.moveTo(rulerX-7,topY);target.lineTo(rulerX+7,topY);target.moveTo(rulerX-7,groundY);target.lineTo(rulerX+7,groundY);target.stroke();
+      for(let y=topY;y<=groundY;y+=Math.max(12,state.canvasHeight*.05)){target.beginPath();target.moveTo(rulerX-4,y);target.lineTo(rulerX+4,y);target.stroke()}
+      target.fillStyle="#0f151d";target.strokeStyle="#66c4ff";target.beginPath();target.arc(ax,groundY,6,0,Math.PI*2);target.fill();target.stroke();target.fillStyle="#9bd8ff";target.font="10px system-ui";target.fillText("ANCHOR",ax+10,groundY-8);
     }
     if (state.bounds && frame) {
       const b = renderedBounds(frame); target.setLineDash([6, 4]); target.strokeStyle = "#ff984b"; target.fillStyle = "rgba(255,138,61,.08)";
@@ -325,6 +392,9 @@
   function syncInputs() {
     $("#projectName").value = state.projectName; $("#canvasWidth").value = state.canvasWidth; $("#canvasHeight").value = state.canvasHeight;
     $("#groundLine").value = state.groundRatio*100; $("#groundOutput").textContent = `${Math.round(state.groundRatio*100)}%`;
+    $("#anchorLine").value = state.anchorRatio*100; $("#anchorOutput").textContent = `${Math.round(state.anchorRatio*100)}%`;
+    $("#rulerHeight").value = state.targetHeightRatio*100; $("#rulerOutput").textContent = `${Math.round(state.targetHeightRatio*100)}%`;
+    $("#guidesBtn").classList.toggle("active", state.guides);
     $("#fpsInput").value = state.fps; $("#loopBtn").classList.toggle("active", state.loop);
   }
   async function importFrames(files) {
@@ -366,12 +436,25 @@
     }
     state.referenceId ||= created[0]?.id;$("#sliceModal").classList.add("hidden");status("Sprite sheet sliced");renderAll();fitZoom();toast(`${created.length} frames created`,"success");
   }
-  function centerPatch(f){const b=renderedBounds(f);return{x:f.x+state.canvasWidth/2-(b.x+b.w/2)}}
+  function centerPatch(f,target=state.canvasWidth*state.anchorRatio){const b=renderedBounds(f);return{x:f.x+target-(b.x+b.w/2)}}
   function groundPatch(f,target=state.canvasHeight*state.groundRatio){const b=renderedBounds(f);return{y:f.y+target-(b.y+b.h)}}
   function match(f,ref){const scaled={...f,scale:ref.charBounds.h*ref.scale/Math.max(1,f.charBounds.h)};const centered={...scaled,...centerPatch(scaled)};const rb=renderedBounds(ref);return{...centered,...groundPatch(centered,rb.y+rb.h)}}
   function normalize() {
     let ref=reference();if(!ref)return toast("Choose a reference frame first","error");commit();ref={...ref,...centerPatch(ref)};ref={...ref,...groundPatch(ref)};
     state.frames=state.frames.map(f=>f.id===ref.id?ref:match(f,ref));renderAll();toast(`Normalized ${state.frames.length} frames`,"success");
+  }
+  function captureGuides() {
+    const f=selected();if(!f)return;commit();const b=renderedBounds(f);
+    state.anchorRatio=clamp((b.x+b.w/2)/state.canvasWidth,.05,.95);state.groundRatio=clamp((b.y+b.h)/state.canvasHeight,.5,.98);state.targetHeightRatio=clamp(b.h/state.canvasHeight,.1,.95);
+    syncInputs();renderAll();toast("Anchor and ruler read from selected frame","success");
+  }
+  function alignSelectedToGuides() {
+    const f=selected();if(!f)return;commit();Object.assign(f,centerPatch(f));Object.assign(f,groundPatch(f));renderAll();toast("Frame aligned to anchor");
+  }
+  function fitAllToGuides() {
+    if(!state.frames.length)return;commit();const targetHeight=state.canvasHeight*state.targetHeightRatio;
+    state.frames.forEach((f)=>{f.scale=clamp(targetHeight/Math.max(1,f.charBounds.h),.05,10);Object.assign(f,centerPatch(f));Object.assign(f,groundPatch(f))});
+    renderAll();toast(`Matched ${state.frames.length} frames to ruler + anchor`,"success");
   }
   async function detectBounds(){const f=selected();if(!f)return;commit();const b=await alphaBounds(f.src);f.charBounds={x:b.x,y:b.y,w:b.w,h:b.h};f.alphaBounds={...f.charBounds};renderAll();toast("Character box detected")}
   async function trim(){const f=selected();if(!f)return;const b=await alphaBounds(f.src);if(b.empty)return toast("This frame is empty","error");commit();const image=await loadImage(f.src),c=document.createElement("canvas");c.width=b.w;c.height=b.h;c.getContext("2d").drawImage(image,b.x,b.y,b.w,b.h,0,0,b.w,b.h);f.src=c.toDataURL("image/png");f.sourceWidth=b.w;f.sourceHeight=b.h;f.alphaBounds={x:0,y:0,w:b.w,h:b.h};f.charBounds={x:clamp(f.charBounds.x-b.x,0,b.w-1),y:clamp(f.charBounds.y-b.y,0,b.h-1),w:Math.min(f.charBounds.w,b.w),h:Math.min(f.charBounds.h,b.h)};images.clear();renderAll();toast("Transparent margins trimmed","success")}
@@ -382,7 +465,28 @@
     for(const f of targets){const image=await loadImage(f.src),c=document.createElement("canvas");c.width=image.naturalWidth;c.height=image.naturalHeight;const x=c.getContext("2d",{willReadFrequently:true});x.drawImage(image,0,0);const id=x.getImageData(0,0,c.width,c.height),d=id.data;for(let i=0;i<d.length;i+=4){const dr=d[i]-target.r,dg=d[i+1]-target.g,db=d[i+2]-target.b,dist=Math.sqrt(dr*dr+dg*dg+db*db);if(dist<=tol)d[i+3]=0;else if(dist<tol+soft&&soft>0)d[i+3]=Math.round(d[i+3]*(dist-tol)/soft);if(d[i+1]>d[i]*1.15&&d[i+1]>d[i+2]*1.15&&dist<tol+soft*2)d[i+1]=Math.max(d[i],d[i+2])}x.putImageData(id,0,0);f.src=c.toDataURL("image/png");const b=await alphaBounds(f.src);f.alphaBounds={x:b.x,y:b.y,w:b.w,h:b.h};f.charBounds={...f.alphaBounds}}
     images.clear();status("Background removed");renderAll();toast("Background removed","success");
   }
-  function fitFrame(){const f=selected();if(!f)return;commit();const b=f.alphaBounds,scale=Math.min(state.canvasWidth*.88/b.w,state.canvasHeight*.88/b.h,1),tmp={...f,scale,x:0,y:0},rb=renderedBounds(tmp);Object.assign(f,{scale,x:state.canvasWidth/2-(rb.x+rb.w/2),y:state.canvasHeight/2-(rb.y+rb.h/2)});renderAll()}
+  async function enhanceFrames(all) {
+    const targets=(all?state.frames:[selected()].filter(Boolean)).filter((f)=>Math.max(f.sourceWidth,f.sourceHeight)<4096);
+    if(!targets.length)return toast("These frames are already at the maximum enhancement size","error");
+    const mode=$("#enhanceMode").value;commit();status(`Enhancing ${targets.length} frame${targets.length===1?"":"s"}…`);
+    for(const f of targets){
+      const image=await loadImage(f.src),factor=Math.min(2,4096/Math.max(image.naturalWidth,image.naturalHeight)),w=Math.max(1,Math.round(image.naturalWidth*factor)),h=Math.max(1,Math.round(image.naturalHeight*factor));
+      const c=document.createElement("canvas");c.width=w;c.height=h;const x=c.getContext("2d",{willReadFrequently:mode==="anime"});x.imageSmoothingEnabled=mode!=="pixel";x.imageSmoothingQuality="high";x.drawImage(image,0,0,w,h);
+      if(mode==="anime"&&w*h<=9000000){
+        const id=x.getImageData(0,0,w,h),d=id.data,source=new Uint8ClampedArray(d);
+        for(let py=1;py<h-1;py++)for(let px=1;px<w-1;px++){
+          const i=(py*w+px)*4;if(source[i+3]<5){d[i+3]=0;continue}
+          for(let channel=0;channel<3;channel++){const average=(source[i-4+channel]+source[i+4+channel]+source[i-w*4+channel]+source[i+w*4+channel])/4;d[i+channel]=clamp(Math.round(source[i+channel]*1.14-average*.14),0,255)}
+          if(d[i+3]<245&&d[i+1]>Math.max(d[i],d[i+2])*1.08)d[i+1]=Math.max(d[i],d[i+2]);
+        }
+        x.putImageData(id,0,0);
+      }
+      f.src=c.toDataURL("image/png");f.sourceWidth=w;f.sourceHeight=h;f.scale/=factor;
+      ["charBounds","alphaBounds"].forEach((key)=>{f[key]={x:f[key].x*factor,y:f[key].y*factor,w:f[key].w*factor,h:f[key].h*factor}});
+    }
+    images.clear();status("Visual enhancement complete");renderAll();toast(`${targets.length} frame${targets.length===1?"":"s"} enhanced in ${mode==="pixel"?"Pixel Art":"Anime Smooth"} mode`,"success");
+  }
+  function fitFrame(){const f=selected();if(!f)return;commit();const b=f.alphaBounds;f.scale=Math.min(state.canvasWidth*.88/b.w,state.canvasHeight*.88/b.h,1);f.x=0;f.y=0;Object.assign(f,centerPatch(f));Object.assign(f,groundPatch(f));renderAll()}
   function deleteSelection() {
     const ids = state.selectedIds.length
       ? [...state.selectedIds]
@@ -424,7 +528,7 @@
     $("#autoInput").onchange=e=>{autoImport(e.target.files[0]);e.target.value=""};
     $("#sheetInput").onchange=e=>{openSlicer(e.target.files[0]);e.target.value=""};$("#framesInput").onchange=e=>{importFrames(e.target.files);e.target.value=""};
     $("#openBtn").onclick=()=>$("#projectInput").click();$("#projectInput").onchange=e=>{if(e.target.files[0])openProject(e.target.files[0]);e.target.value=""};
-    $("#saveBtn").onclick=saveProject;$("#newBtn").onclick=()=>{if(state.frames.length&&!confirm("Start a new project? Unsaved work will be cleared."))return;restore({version:1,projectName:"Untitled Animation",frames:[],selectedId:null,referenceId:null,canvasWidth:512,canvasHeight:512,groundRatio:.88,fps:12,loop:true});state.history=[];state.future=[]};
+    $("#saveBtn").onclick=saveProject;$("#newBtn").onclick=()=>{if(state.frames.length&&!confirm("Start a new project? Unsaved work will be cleared."))return;restore({version:1,projectName:"Untitled Animation",frames:[],selectedId:null,referenceId:null,canvasWidth:512,canvasHeight:512,groundRatio:.88,anchorRatio:.5,targetHeightRatio:.72,fps:12,loop:true});state.history=[];state.future=[]};
     $("#undoBtn").onclick=undo;$("#redoBtn").onclick=redo;
     $("#exportBtn").onclick=()=>{$("#exportPrefix").value=state.projectName==="Untitled Animation"?"animation":state.projectName;updateExport();$("#exportModal").classList.remove("hidden")};
     $("#firstBtn").onclick=()=>{if(state.frames[0]){state.selectedId=state.frames[0].id;state.selectedIds=[state.frames[0].id];state.selectionAnchorId=state.frames[0].id;renderAll()}};$("#reverseBtn").onclick=()=>{if(state.frames.length>1){commit();state.frames.reverse();renderAll()}};
@@ -439,20 +543,25 @@
     $("#detectBtn").onclick=detectBounds;$("#referenceBtn").onclick=()=>{const f=selected();commit();state.referenceId=f.id;renderAll()};$("#matchBtn").onclick=()=>{const f=selected(),r=reference();if(!f||!r)return;commit();Object.assign(f,match(f,r));renderAll()};
     $("#trimBtn").onclick=trim;$("#fitFrameBtn").onclick=fitFrame;$("#normalizeBtn").onclick=normalize;$("#resetBtn").onclick=()=>{const f=selected();if(!f)return;commit();Object.assign(f,{x:0,y:0,scale:1,rotation:0,charBounds:{...f.alphaBounds}});renderAll()};
     bindNumber("#canvasWidth",v=>{commit();state.canvasWidth=clamp(v,16,4096);renderAll();fitZoom()});bindNumber("#canvasHeight",v=>{commit();state.canvasHeight=clamp(v,16,4096);renderAll();fitZoom()});
+    ["#groundLine","#anchorLine","#rulerHeight"].forEach((id)=>{$(id).onpointerdown=()=>commit();$(id).onkeydown=e=>{if(["ArrowLeft","ArrowRight","Home","End","PageUp","PageDown"].includes(e.key))commit()}});
     $("#groundLine").oninput=e=>{state.groundRatio=Number(e.target.value)/100;$("#groundOutput").textContent=`${e.target.value}%`;renderCanvas()};
+    $("#anchorLine").oninput=e=>{state.anchorRatio=Number(e.target.value)/100;$("#anchorOutput").textContent=`${e.target.value}%`;renderCanvas()};
+    $("#rulerHeight").oninput=e=>{state.targetHeightRatio=Number(e.target.value)/100;$("#rulerOutput").textContent=`${e.target.value}%`;renderCanvas()};
+    $("#captureGuideBtn").onclick=captureGuides;$("#alignGuideBtn").onclick=alignSelectedToGuides;$("#fitAllGuideBtn").onclick=fitAllToGuides;
     $("#softness").oninput=e=>$("#softOutput").textContent=e.target.value;$("#removeBgBtn").onclick=()=>removeBackground(false);$("#removeBgAllBtn").onclick=()=>removeBackground(true);
+    $("#enhanceBtn").onclick=()=>enhanceFrames(false);$("#enhanceAllBtn").onclick=()=>enhanceFrames(true);
     bindNumber("#fpsInput",v=>{commit();state.fps=clamp(v,1,60);state.frames.forEach(f=>f.duration=Math.round(1000/state.fps));renderAll()});$("#loopBtn").onclick=()=>{state.loop=!state.loop;$("#loopBtn").classList.toggle("active",state.loop)};
     $("#previousBtn").onclick=()=>step(-1);$("#nextBtn").onclick=()=>step(1);$("#playBtn").onclick=play;
-    $("#gridBtn").onclick=()=>{state.grid=!state.grid;$("#gridBtn").classList.toggle("active",state.grid);renderCanvas()};$("#groundBtn").onclick=()=>{state.ground=!state.ground;$("#groundBtn").classList.toggle("active",state.ground);renderCanvas()};$("#boundsBtn").onclick=()=>{state.bounds=!state.bounds;$("#boundsBtn").classList.toggle("active",state.bounds);renderCanvas()};
-    $$("[data-tool]").forEach(b=>b.onclick=()=>{state.tool=b.dataset.tool;$$("[data-tool]").forEach(x=>x.classList.toggle("active",x===b))});
+    $("#gridBtn").onclick=()=>{state.grid=!state.grid;$("#gridBtn").classList.toggle("active",state.grid);renderCanvas()};$("#groundBtn").onclick=()=>{state.ground=!state.ground;$("#groundBtn").classList.toggle("active",state.ground);renderCanvas()};$("#guidesBtn").onclick=()=>{state.guides=!state.guides;$("#guidesBtn").classList.toggle("active",state.guides);renderCanvas()};$("#boundsBtn").onclick=()=>{state.bounds=!state.bounds;$("#boundsBtn").classList.toggle("active",state.bounds);renderCanvas()};
+    $$("[data-tool]").forEach(b=>b.onclick=()=>{state.tool=b.dataset.tool;canvas.style.cursor=state.tool==="guides"?"crosshair":"grab";$$("[data-tool]").forEach(x=>x.classList.toggle("active",x===b))});
     $("#zoomInBtn").onclick=()=>{state.zoom=clamp(state.zoom+.1,.1,4);renderCanvas()};$("#zoomOutBtn").onclick=()=>{state.zoom=clamp(state.zoom-.1,.1,4);renderCanvas()};$("#fitBtn").onclick=fitZoom;
     ["#sliceCols","#sliceRows","#sliceGapX","#sliceGapY","#sliceMarginX","#sliceMarginY"].forEach(id=>$(id).oninput=renderSlice);$("#confirmSliceBtn").onclick=confirmSlice;
     $$("[data-close]").forEach(b=>b.onclick=()=>$("#"+b.dataset.close).classList.add("hidden"));$("#exportColumns").oninput=updateExport;$("#exportResolution").onchange=updateExport;$("#exportSheetBtn").onclick=exportSheet;$("#exportFramesBtn").onclick=exportFrames;
     $$(".section-title").forEach(b=>b.onclick=()=>{const body=b.nextElementSibling;body.classList.toggle("hidden");b.lastElementChild.textContent=body.classList.contains("hidden")?"⌄":"⌃"});
     $("#projectName").oninput=e=>{state.projectName=e.target.value;$("#saveState").textContent="Unsaved changes"};
-    canvas.onpointerdown=e=>{const f=selected();if(!f)return;commit();const r=canvas.getBoundingClientRect(),p={x:(e.clientX-r.left)/r.width*state.canvasWidth,y:(e.clientY-r.top)/r.height*state.canvasHeight};pointerDrag={p,x:f.x,y:f.y,b:{...f.charBounds}};canvas.setPointerCapture(e.pointerId)};
-    canvas.onpointermove=e=>{const f=selected();if(!f||!pointerDrag)return;const r=canvas.getBoundingClientRect(),p={x:(e.clientX-r.left)/r.width*state.canvasWidth,y:(e.clientY-r.top)/r.height*state.canvasHeight},dx=p.x-pointerDrag.p.x,dy=p.y-pointerDrag.p.y;if(state.tool==="move"){f.x=pointerDrag.x+dx;f.y=pointerDrag.y+dy}else{f.charBounds.x=pointerDrag.b.x+dx/f.scale;f.charBounds.y=pointerDrag.b.y+dy/f.scale}renderInspector();renderCanvas()};canvas.onpointerup=()=>pointerDrag=null;
-    window.ondragover=e=>e.preventDefault();window.ondrop=e=>{e.preventDefault();const fs=[...e.dataTransfer.files].filter(f=>f.type.startsWith("image/"));if(fs.length===1)openSlicer(fs[0]);else importFrames(fs)};
+    canvas.onpointerdown=e=>{const r=canvas.getBoundingClientRect(),p={x:(e.clientX-r.left)/r.width*state.canvasWidth,y:(e.clientY-r.top)/r.height*state.canvasHeight};if(state.tool==="guides"){commit();pointerDrag={kind:"guides"};state.anchorRatio=clamp(p.x/state.canvasWidth,.05,.95);state.groundRatio=clamp(p.y/state.canvasHeight,.5,.98);syncInputs();renderCanvas();canvas.setPointerCapture(e.pointerId);return}const f=selected();if(!f)return;commit();pointerDrag={kind:state.tool,p,x:f.x,y:f.y,b:{...f.charBounds}};canvas.setPointerCapture(e.pointerId)};
+    canvas.onpointermove=e=>{if(!pointerDrag)return;const r=canvas.getBoundingClientRect(),p={x:(e.clientX-r.left)/r.width*state.canvasWidth,y:(e.clientY-r.top)/r.height*state.canvasHeight};if(pointerDrag.kind==="guides"){state.anchorRatio=clamp(p.x/state.canvasWidth,.05,.95);state.groundRatio=clamp(p.y/state.canvasHeight,.5,.98);$("#anchorLine").value=state.anchorRatio*100;$("#anchorOutput").textContent=`${Math.round(state.anchorRatio*100)}%`;$("#groundLine").value=state.groundRatio*100;$("#groundOutput").textContent=`${Math.round(state.groundRatio*100)}%`;renderCanvas();return}const f=selected();if(!f)return;const dx=p.x-pointerDrag.p.x,dy=p.y-pointerDrag.p.y;if(pointerDrag.kind==="move"){f.x=pointerDrag.x+dx;f.y=pointerDrag.y+dy}else{f.charBounds.x=pointerDrag.b.x+dx/f.scale;f.charBounds.y=pointerDrag.b.y+dy/f.scale}renderInspector();renderCanvas()};canvas.onpointerup=()=>pointerDrag=null;
+    window.ondragover=e=>e.preventDefault();window.ondrop=e=>{e.preventDefault();const fs=[...e.dataTransfer.files].filter(f=>f.type.startsWith("image/"));if(fs.length===1)autoImport(fs[0]);else importFrames(fs)};
     window.onkeydown=e=>{
       const typing=["INPUT","TEXTAREA"].includes(document.activeElement?.tagName);
       const modalOpen = Boolean(document.querySelector(".modal-backdrop:not(.hidden)"));
