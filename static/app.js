@@ -169,6 +169,10 @@
         if(px<w-1&&labels[p+1]===-1&&d[(p+1)*4+3]>=18){labels[p+1]=label;queue[tail++]=p+1}
         if(py>0&&labels[p-w]===-1&&d[(p-w)*4+3]>=18){labels[p-w]=label;queue[tail++]=p-w}
         if(py<h-1&&labels[p+w]===-1&&d[(p+w)*4+3]>=18){labels[p+w]=label;queue[tail++]=p+w}
+        if(px>0&&py>0&&labels[p-w-1]===-1&&d[(p-w-1)*4+3]>=18){labels[p-w-1]=label;queue[tail++]=p-w-1}
+        if(px<w-1&&py>0&&labels[p-w+1]===-1&&d[(p-w+1)*4+3]>=18){labels[p-w+1]=label;queue[tail++]=p-w+1}
+        if(px>0&&py<h-1&&labels[p+w-1]===-1&&d[(p+w-1)*4+3]>=18){labels[p+w-1]=label;queue[tail++]=p+w-1}
+        if(px<w-1&&py<h-1&&labels[p+w+1]===-1&&d[(p+w+1)*4+3]>=18){labels[p+w+1]=label;queue[tail++]=p+w+1}
       }
       parts.push({id:label,area,minX,minY,maxX,maxY,cx:sumX/area,cy:sumY/area,whiteRatio:white/area});
     }
@@ -190,7 +194,7 @@
     if(!seeds.length)return[];
     const rowOrdered=[...seeds].sort((a,b)=>a.cy-b.cy),ordered=[];
     for(let i=0;i<rowOrdered.length;i+=grid.cols)ordered.push(...rowOrdered.slice(i,i+grid.cols).sort((a,b)=>a.cx-b.cx));
-    const groups=ordered.map((seed)=>({seed,parts:[seed]}));
+    const groups=ordered.map((seed)=>({seed,parts:[seed]}));let filteredParts=0;
     for(const part of analysis.parts){
       if(ordered.includes(part))continue;
       let best=null,bestDistance=Infinity;
@@ -200,7 +204,19 @@
       });
       if(!best||bestDistance>.78)continue;
       const likelyLabel=part.area<best.seed.area*.09&&part.whiteRatio>.42&&part.cy>best.seed.cy+cellH*.2;
-      if(!likelyLabel)best.parts.push(part);
+      const gapX=Math.max(0,best.seed.minX-part.maxX,part.minX-best.seed.maxX);
+      const gapY=Math.max(0,best.seed.minY-part.maxY,part.minY-best.seed.maxY);
+      const edgeDistance=Math.hypot(gapX/Math.max(1,cellW),gapY/Math.max(1,cellH));
+      const areaRatio=part.area/Math.max(1,best.seed.area);
+      const tiny=part.area<Math.max(14,best.seed.area*.0015);
+      const detachedParticle=areaRatio<.018&&edgeDistance>.13;
+      const plausiblePart=areaRatio>=.018
+        ? edgeDistance<.72
+        : areaRatio>=.004
+          ? edgeDistance<.18
+          : edgeDistance<.045;
+      if(!likelyLabel&&!tiny&&!detachedParticle&&plausiblePart)best.parts.push(part);
+      else filteredParts++;
     }
     const padding=Math.max(3,Math.round(Math.min(cellW,cellH)*.025)),objects=[];
     for(const group of groups){
@@ -214,6 +230,7 @@
       }
       ox.putImageData(outId,0,0);objects.push(out);
     }
+    objects.filteredParts=filteredParts;
     return objects;
   }
   function detectBodyBounds(c) {
@@ -251,7 +268,8 @@
       created.forEach((frame)=>{frame.scale=clamp(bodyHeight/Math.max(1,frame.charBounds.h),.05,10);Object.assign(frame,centerPatch(frame));Object.assign(frame,groundPatch(frame))});
       state.frames.push(...created);state.selectedId=created[0].id;state.selectedIds=[created[0].id];state.selectionAnchorId=created[0].id;state.referenceId ||= created[0].id;
       $("#bgColor").value=colorHex(key);images.clear();syncInputs();renderAll();fitZoom();status("Auto import complete");
-      toast(`Auto Import: ${created.length} complete objects · background removed · arranged ${grid.cols} × ${grid.rows}`,"success");
+      const filteredNote=objects.filteredParts?` · ${objects.filteredParts} loose fragments filtered`:"";
+      toast(`Auto Import: ${created.length} complete objects · background removed${filteredNote} · arranged ${grid.cols} × ${grid.rows}`,"success");
     }catch(error){status("Ready");toast("Automatic import could not read this sheet. Try Manual Grid.","error")}
   }
   function drawRect(frame) {
@@ -278,15 +296,24 @@
     }
     if (state.ground) {
       const y = state.canvasHeight * state.groundRatio;
-      target.setLineDash([]); target.strokeStyle = "#57d99b"; target.beginPath(); target.moveTo(0, y); target.lineTo(state.canvasWidth, y); target.stroke();
-      target.fillStyle = "#57d99b"; target.font = "11px system-ui"; target.fillText("GROUND", 8, y - 7);
+      target.setLineDash([]);target.lineWidth=7;target.strokeStyle="#28140d";target.beginPath();target.moveTo(0,y);target.lineTo(state.canvasWidth,y);target.stroke();
+      target.lineWidth=3;target.strokeStyle="#78f0b1";target.beginPath();target.moveTo(0,y);target.lineTo(state.canvasWidth,y);target.stroke();
+      target.fillStyle="#28140d";target.fillRect(6,y-23,62,17);target.strokeStyle="#78f0b1";target.lineWidth=2;target.strokeRect(6,y-23,62,17);
+      target.fillStyle="#a8ffd0";target.font="bold 11px system-ui";target.fillText("GROUND",12,y-10);
     }
     if (state.guides) {
       const ax=state.canvasWidth*state.anchorRatio,groundY=state.canvasHeight*state.groundRatio,topY=groundY-state.canvasHeight*state.targetHeightRatio,rulerX=clamp(ax-34,14,state.canvasWidth-14);
-      target.setLineDash([4,5]);target.strokeStyle="rgba(102,196,255,.8)";target.lineWidth=1;target.beginPath();target.moveTo(ax,0);target.lineTo(ax,state.canvasHeight);target.stroke();
-      target.setLineDash([]);target.strokeStyle="#66c4ff";target.lineWidth=2;target.beginPath();target.moveTo(rulerX,topY);target.lineTo(rulerX,groundY);target.moveTo(rulerX-7,topY);target.lineTo(rulerX+7,topY);target.moveTo(rulerX-7,groundY);target.lineTo(rulerX+7,groundY);target.stroke();
-      for(let y=topY;y<=groundY;y+=Math.max(12,state.canvasHeight*.05)){target.beginPath();target.moveTo(rulerX-4,y);target.lineTo(rulerX+4,y);target.stroke()}
-      target.fillStyle="#0f151d";target.strokeStyle="#66c4ff";target.beginPath();target.arc(ax,groundY,6,0,Math.PI*2);target.fill();target.stroke();target.fillStyle="#9bd8ff";target.font="10px system-ui";target.fillText("ANCHOR",ax+10,groundY-8);
+      target.setLineDash([10,6]);target.lineWidth=6;target.strokeStyle="#28140d";target.beginPath();target.moveTo(ax,0);target.lineTo(ax,state.canvasHeight);target.stroke();
+      target.lineWidth=3;target.strokeStyle="#ffd08a";target.beginPath();target.moveTo(ax,0);target.lineTo(ax,state.canvasHeight);target.stroke();
+      target.setLineDash([]);target.lineWidth=6;target.strokeStyle="#28140d";target.beginPath();target.moveTo(rulerX,topY);target.lineTo(rulerX,groundY);target.moveTo(rulerX-9,topY);target.lineTo(rulerX+9,topY);target.moveTo(rulerX-9,groundY);target.lineTo(rulerX+9,groundY);target.stroke();
+      target.lineWidth=3;target.strokeStyle="#ffd08a";target.beginPath();target.moveTo(rulerX,topY);target.lineTo(rulerX,groundY);target.moveTo(rulerX-9,topY);target.lineTo(rulerX+9,topY);target.moveTo(rulerX-9,groundY);target.lineTo(rulerX+9,groundY);target.stroke();
+      for(let y=topY;y<=groundY;y+=Math.max(12,state.canvasHeight*.05)){target.lineWidth=3;target.beginPath();target.moveTo(rulerX-5,y);target.lineTo(rulerX+5,y);target.stroke()}
+      const fenceLeft=Math.max(2,ax-44),fenceRight=Math.min(state.canvasWidth-2,ax+44);
+      target.lineWidth=8;target.strokeStyle="#28140d";target.beginPath();target.moveTo(fenceLeft,groundY);target.lineTo(fenceRight,groundY);target.moveTo(fenceLeft,groundY-10);target.lineTo(fenceLeft,groundY+10);target.moveTo(fenceRight,groundY-10);target.lineTo(fenceRight,groundY+10);target.stroke();
+      target.lineWidth=4;target.strokeStyle="#ffd08a";target.beginPath();target.moveTo(fenceLeft,groundY);target.lineTo(fenceRight,groundY);target.moveTo(fenceLeft,groundY-10);target.lineTo(fenceLeft,groundY+10);target.moveTo(fenceRight,groundY-10);target.lineTo(fenceRight,groundY+10);target.stroke();
+      target.fillStyle="#28140d";target.strokeStyle="#ffd08a";target.lineWidth=3;target.beginPath();target.arc(ax,groundY,9,0,Math.PI*2);target.fill();target.stroke();
+      target.fillStyle="#28140d";target.fillRect(ax+12,groundY-25,62,18);target.strokeStyle="#ffd08a";target.lineWidth=2;target.strokeRect(ax+12,groundY-25,62,18);
+      target.fillStyle="#ffe2ad";target.font="bold 10px system-ui";target.fillText("ANCHOR",ax+18,groundY-12);
     }
     if (state.bounds && frame) {
       const b = renderedBounds(frame); target.setLineDash([6, 4]); target.strokeStyle = "#ff984b"; target.fillStyle = "rgba(255,138,61,.08)";

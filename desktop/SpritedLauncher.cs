@@ -9,16 +9,16 @@ using System.Windows.Forms;
 [assembly: AssemblyCompany("SPRITED")]
 [assembly: AssemblyProduct("SPRITED")]
 [assembly: AssemblyCopyright("Copyright © 2026 SPRITED")]
-[assembly: AssemblyVersion("0.6.1.0")]
-[assembly: AssemblyFileVersion("0.6.1.0")]
-[assembly: AssemblyInformationalVersion("0.6.1")]
+[assembly: AssemblyVersion("0.6.2.0")]
+[assembly: AssemblyFileVersion("0.6.2.0")]
+[assembly: AssemblyInformationalVersion("0.6.2")]
 
 namespace SpritedDesktop
 {
     internal static class Program
     {
         private const string DisplayName = "SPRITED";
-        private const string DisplayVersion = "VER.0.6.1";
+        private const string DisplayVersion = "VER.0.6.2";
 
         [STAThread]
         private static void Main()

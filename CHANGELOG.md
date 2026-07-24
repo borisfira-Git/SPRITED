@@ -1,5 +1,12 @@
 # SPRITED version history
 
+## 0.6.2
+
+- Improved automatic filtering of tiny detached particles and unrelated fragments.
+- Added diagonal connectivity so intended anti-aliased sprite edges stay together.
+- Strengthened the ground and anchor guides with outlined high-contrast lines.
+- Added a fenced lower anchor baseline for clearer foot alignment.
+
 ## 0.6.1
 
 - Added Ctrl + mouse-wheel zoom inside the frame editor.

@@ -319,14 +319,26 @@ export default function Sprited() {
       if (showGround) {
         const y = canvasHeight * groundRatio;
         ctx.setLineDash([]);
-        ctx.strokeStyle = "rgba(87,217,155,.95)";
+        ctx.lineWidth = 7;
+        ctx.strokeStyle = "#28140d";
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(canvasWidth, y);
         ctx.stroke();
-        ctx.fillStyle = "#57d99b";
-        ctx.font = "11px system-ui";
-        ctx.fillText("GROUND", 8, y - 7);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "#78f0b1";
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvasWidth, y);
+        ctx.stroke();
+        ctx.fillStyle = "#28140d";
+        ctx.fillRect(6, y - 23, 62, 17);
+        ctx.strokeStyle = "#78f0b1";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(6, y - 23, 62, 17);
+        ctx.fillStyle = "#a8ffd0";
+        ctx.font = "bold 11px system-ui";
+        ctx.fillText("GROUND", 12, y - 10);
       }
       if (showBounds && frame) {
         const box = renderedCharacterBounds(frame);
@@ -967,7 +979,7 @@ export default function Sprited() {
         <div className="brand">
           <div className="brand-mark"><span /><span /><span /><span /></div>
           <div className="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div>
-          <span className="version-badge">VER.0.6.1</span>
+          <span className="version-badge">VER.0.6.2</span>
         </div>
         <div className="project-title">
           <input value={projectName} onChange={(event) => { setProjectName(event.target.value); setDirty(true); }} aria-label="Project name" />
