@@ -1,5 +1,5 @@
-import AnimaSprite from "./AnimaSprite";
+import Sprited from "./Sprited";
 
 export default function Home() {
-  return <AnimaSprite />;
+  return <Sprited />;
 }

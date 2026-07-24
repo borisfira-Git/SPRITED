@@ -149,7 +149,7 @@ function icon(name: string) {
   return map[name] || "•";
 }
 
-export default function AnimaSprite() {
+export default function Sprited() {
   const [projectName, setProjectName] = useState("Untitled Animation");
   const [frames, setFrames] = useState<Frame[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -940,7 +940,8 @@ export default function AnimaSprite() {
       <header className="topbar">
         <div className="brand">
           <div className="brand-mark"><span /><span /><span /><span /></div>
-          <div><strong>AnimaSprite</strong><small>Sprite Sheet Studio</small></div>
+          <div className="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div>
+          <span className="version-badge">VER.0.6.0</span>
         </div>
         <div className="project-title">
           <input value={projectName} onChange={(event) => { setProjectName(event.target.value); setDirty(true); }} aria-label="Project name" />

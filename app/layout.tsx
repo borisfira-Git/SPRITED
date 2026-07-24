@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AnimaSprite — Sprite Sheet Studio",
+  title: "SPRITED — Sprite Sheet Studio",
   description:
     "Prepare, align, preview and export sprite sheets for Godot AnimatedSprite2D.",
   icons: {
@@ -10,13 +10,13 @@ export const metadata: Metadata = {
     shortcut: "/favicon.svg",
   },
   openGraph: {
-    title: "AnimaSprite",
+    title: "SPRITED",
     description: "Prepare. Align. Animate.",
     images: ["/og.png"],
   },
   twitter: {
     card: "summary_large_image",
-    title: "AnimaSprite",
+    title: "SPRITED",
     description: "Prepare. Align. Animate.",
     images: ["/og.png"],
   },
