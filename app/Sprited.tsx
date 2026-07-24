@@ -401,10 +401,40 @@ export default function Sprited() {
       } else if (!typing && event.code === "Space") {
         event.preventDefault();
         setPlaying((value) => !value);
-      } else if (!typing && event.key === "ArrowRight") {
+      } else if (!typing && event.altKey && event.key === "ArrowRight") {
+        event.preventDefault();
         stepFrame(1);
-      } else if (!typing && event.key === "ArrowLeft") {
+      } else if (!typing && event.altKey && event.key === "ArrowLeft") {
+        event.preventDefault();
         stepFrame(-1);
+      } else if (
+        !typing &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey &&
+        ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key) &&
+        selectedId
+      ) {
+        event.preventDefault();
+        if (!event.repeat) pushHistory();
+        const amount = event.shiftKey ? 10 : 1;
+        const movement: Record<string, { x: number; y: number }> = {
+          ArrowLeft: { x: -amount, y: 0 },
+          ArrowRight: { x: amount, y: 0 },
+          ArrowUp: { x: 0, y: -amount },
+          ArrowDown: { x: 0, y: amount },
+        };
+        const delta = movement[event.key];
+        const ids = new Set(selectedIds.length ? selectedIds : [selectedId]);
+        setFrames((items) =>
+          items.map((frame) =>
+            ids.has(frame.id)
+              ? { ...frame, x: frame.x + delta.x, y: frame.y + delta.y }
+              : frame,
+          ),
+        );
+        setDirty(true);
+        setStatus(`Moved ${ids.size === 1 ? "frame" : `${ids.size} frames`} ${amount}px`);
       } else if (!typing && event.key === "Delete") {
         event.preventDefault();
         deleteSelection();
@@ -979,7 +1009,7 @@ export default function Sprited() {
         <div className="brand">
           <div className="brand-mark"><span /><span /><span /><span /></div>
           <div className="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div>
-          <span className="version-badge">VER.0.6.2</span>
+          <span className="version-badge">VER.0.6.3</span>
         </div>
         <div className="project-title">
           <input value={projectName} onChange={(event) => { setProjectName(event.target.value); setDirty(true); }} aria-label="Project name" />
@@ -1082,7 +1112,7 @@ export default function Sprited() {
               <button onClick={() => setZoom((value) => clamp(value + 0.1, 0.1, 4))}>＋</button>
             </div>
           </div>
-          <div ref={stageRef} className="canvas-stage" title="Ctrl + mouse wheel to zoom">
+          <div ref={stageRef} className="canvas-stage" title="Ctrl + wheel: zoom · Arrows: move · Shift + arrows: move 10px">
             {!frames.length ? (
               <div className="empty-state">
                 <div className="empty-art"><div className="mini-sheet"><i /><i /><i /><i /></div><b>✦</b></div>

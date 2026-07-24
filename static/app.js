@@ -465,6 +465,17 @@
   }
   function centerPatch(f,target=state.canvasWidth*state.anchorRatio){const b=renderedBounds(f);return{x:f.x+target-(b.x+b.w/2)}}
   function groundPatch(f,target=state.canvasHeight*state.groundRatio){const b=renderedBounds(f);return{y:f.y+target-(b.y+b.h)}}
+  function nudgeSelection(key,amount){
+    const movement={
+      ArrowLeft:{x:-amount,y:0},ArrowRight:{x:amount,y:0},
+      ArrowUp:{x:0,y:-amount},ArrowDown:{x:0,y:amount}
+    }[key];
+    if(!movement)return 0;
+    const ids=new Set(state.selectedIds.length?state.selectedIds:[state.selectedId].filter(Boolean));
+    let moved=0;
+    state.frames.forEach((frame)=>{if(ids.has(frame.id)){frame.x+=movement.x;frame.y+=movement.y;moved++}});
+    return moved;
+  }
   function match(f,ref){const scaled={...f,scale:ref.charBounds.h*ref.scale/Math.max(1,f.charBounds.h)};const centered={...scaled,...centerPatch(scaled)};const rb=renderedBounds(ref);return{...centered,...groundPatch(centered,rb.y+rb.h)}}
   function normalize() {
     let ref=reference();if(!ref)return toast("Choose a reference frame first","error");commit();ref={...ref,...centerPatch(ref)};ref={...ref,...groundPatch(ref)};
@@ -620,8 +631,12 @@
       else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){e.preventDefault();saveProject()}
       else if(!typing&&!modalOpen&&e.key==="Delete"){e.preventDefault();deleteSelection()}
       else if(!typing&&e.code==="Space"){e.preventDefault();play()}
-      else if(!typing&&e.key==="ArrowRight")step(1);
-      else if(!typing&&e.key==="ArrowLeft")step(-1)
+      else if(!typing&&!modalOpen&&e.altKey&&e.key==="ArrowRight"){e.preventDefault();step(1)}
+      else if(!typing&&!modalOpen&&e.altKey&&e.key==="ArrowLeft"){e.preventDefault();step(-1)}
+      else if(!typing&&!modalOpen&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"].includes(e.key)){
+        e.preventDefault();if(!e.repeat)commit();const amount=e.shiftKey?10:1,moved=nudgeSelection(e.key,amount);
+        if(moved){$("#saveState").textContent="Unsaved changes";renderAll();status(`Moved ${moved===1?"frame":`${moved} frames`} ${amount}px`)}
+      }
     };
   }
   bind(); syncInputs(); renderAll();

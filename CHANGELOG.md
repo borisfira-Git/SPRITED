@@ -1,5 +1,12 @@
 # SPRITED version history
 
+## 0.6.3
+
+- Added arrow-key movement for the selected sprite frames in the editor.
+- Shift + arrow moves by 10 pixels; a normal arrow moves by 1 pixel.
+- Multiple selected frames move together and the action supports undo.
+- Alt + Left/Right now changes the active animation frame.
+
 ## 0.6.2
 
 - Improved automatic filtering of tiny detached particles and unrelated fragments.
