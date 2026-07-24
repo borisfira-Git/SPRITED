@@ -1,5 +1,10 @@
 # SPRITED version history
 
+## 0.6.1
+
+- Added Ctrl + mouse-wheel zoom inside the frame editor.
+- Zoom stays focused around the mouse pointer and is limited to 10%–400%.
+
 ## 0.6.0
 
 - Renamed the application to SPRITED.

@@ -519,6 +519,22 @@
   async function exportFrames(){if(!state.frames.length)return;const size=exportFrameSize();let dir=null;if(window.showDirectoryPicker){try{dir=await window.showDirectoryPicker({mode:"readwrite"})}catch{return}}for(let i=0;i<state.frames.length;i++){const blob=await canvasBlob(await renderedFrame(state.frames[i],size)),name=`${prefix()}_${size.w}px_${String(i+1).padStart(3,"0")}.png`;if(dir){const h=await dir.getFileHandle(name,{create:true}),w=await h.createWritable();await w.write(blob);await w.close()}else{download(blob,name);await new Promise(r=>setTimeout(r,80))}}toast(`${state.frames.length} frames exported at ${size.w} × ${size.h}`,"success");$("#exportModal").classList.add("hidden")}
   function saveProject(){state.projectName=$("#projectName").value.trim()||"Untitled Animation";download(new Blob([JSON.stringify(snapshot())],{type:"application/json"}),`${state.projectName.replace(/[^\w-]+/g,"_").toLowerCase()}.spriteproject`);$("#saveState").textContent="Saved locally";toast("Project saved","success")}
   async function openProject(file){try{const data=JSON.parse(await file.text());if(!Array.isArray(data.frames))throw Error();state.history=[];state.future=[];restore(data);$("#saveState").textContent="Saved locally";toast("Project opened","success")}catch{toast("Could not open this project","error")}}
+  function setEditorZoom(nextZoom, anchorEvent) {
+    const stage=$("#canvasStage"),previous=state.zoom,rect=stage.getBoundingClientRect();
+    const localX=anchorEvent?anchorEvent.clientX-rect.left:rect.width/2;
+    const localY=anchorEvent?anchorEvent.clientY-rect.top:rect.height/2;
+    const contentX=stage.scrollLeft+localX,contentY=stage.scrollTop+localY;
+    state.zoom=clamp(nextZoom,.1,4);
+    if(state.zoom===previous)return;
+    renderCanvas();
+    if(anchorEvent){
+      const ratio=state.zoom/previous;
+      requestAnimationFrame(()=>{
+        stage.scrollLeft=contentX*ratio-localX;
+        stage.scrollTop=contentY*ratio-localY;
+      });
+    }
+  }
   function fitZoom(){const r=$("#canvasStage").getBoundingClientRect();state.zoom=clamp(Math.min((r.width-90)/state.canvasWidth,(r.height-90)/state.canvasHeight),.1,2);renderCanvas()}
   function bindNumber(id,cb){$(id).onchange=e=>{const v=Number(e.target.value);if(Number.isFinite(v))cb(v)}}
   function bind() {
@@ -554,7 +570,14 @@
     $("#previousBtn").onclick=()=>step(-1);$("#nextBtn").onclick=()=>step(1);$("#playBtn").onclick=play;
     $("#gridBtn").onclick=()=>{state.grid=!state.grid;$("#gridBtn").classList.toggle("active",state.grid);renderCanvas()};$("#groundBtn").onclick=()=>{state.ground=!state.ground;$("#groundBtn").classList.toggle("active",state.ground);renderCanvas()};$("#guidesBtn").onclick=()=>{state.guides=!state.guides;$("#guidesBtn").classList.toggle("active",state.guides);renderCanvas()};$("#boundsBtn").onclick=()=>{state.bounds=!state.bounds;$("#boundsBtn").classList.toggle("active",state.bounds);renderCanvas()};
     $$("[data-tool]").forEach(b=>b.onclick=()=>{state.tool=b.dataset.tool;canvas.style.cursor=state.tool==="guides"?"crosshair":"grab";$$("[data-tool]").forEach(x=>x.classList.toggle("active",x===b))});
-    $("#zoomInBtn").onclick=()=>{state.zoom=clamp(state.zoom+.1,.1,4);renderCanvas()};$("#zoomOutBtn").onclick=()=>{state.zoom=clamp(state.zoom-.1,.1,4);renderCanvas()};$("#fitBtn").onclick=fitZoom;
+    $("#zoomInBtn").onclick=()=>setEditorZoom(state.zoom+.1);$("#zoomOutBtn").onclick=()=>setEditorZoom(state.zoom-.1);$("#fitBtn").onclick=fitZoom;
+    $("#canvasStage").addEventListener("wheel",event=>{
+      if(!event.ctrlKey||!state.frames.length)return;
+      event.preventDefault();
+      const factor=event.deltaY<0?1.1:1/1.1;
+      setEditorZoom(Number((state.zoom*factor).toFixed(3)),event);
+      status(`Zoom ${Math.round(state.zoom*100)}%`);
+    },{passive:false});
     ["#sliceCols","#sliceRows","#sliceGapX","#sliceGapY","#sliceMarginX","#sliceMarginY"].forEach(id=>$(id).oninput=renderSlice);$("#confirmSliceBtn").onclick=confirmSlice;
     $$("[data-close]").forEach(b=>b.onclick=()=>$("#"+b.dataset.close).classList.add("hidden"));$("#exportColumns").oninput=updateExport;$("#exportResolution").onchange=updateExport;$("#exportSheetBtn").onclick=exportSheet;$("#exportFramesBtn").onclick=exportFrames;
     $$(".section-title").forEach(b=>b.onclick=()=>{const body=b.nextElementSibling;body.classList.toggle("hidden");b.lastElementChild.textContent=body.classList.contains("hidden")?"⌄":"⌃"});

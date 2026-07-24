@@ -403,6 +403,32 @@ export default function Sprited() {
   });
 
   useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey || !frames.length) return;
+      event.preventDefault();
+      const previous = zoom;
+      const next = clamp(Number((previous * (event.deltaY < 0 ? 1.1 : 1 / 1.1)).toFixed(3)), 0.1, 4);
+      if (next === previous) return;
+      const rect = stage.getBoundingClientRect();
+      const localX = event.clientX - rect.left;
+      const localY = event.clientY - rect.top;
+      const contentX = stage.scrollLeft + localX;
+      const contentY = stage.scrollTop + localY;
+      setZoom(next);
+      setStatus(`Zoom ${Math.round(next * 100)}%`);
+      requestAnimationFrame(() => {
+        const ratio = next / previous;
+        stage.scrollLeft = contentX * ratio - localX;
+        stage.scrollTop = contentY * ratio - localY;
+      });
+    };
+    stage.addEventListener("wheel", onWheel, { passive: false });
+    return () => stage.removeEventListener("wheel", onWheel);
+  }, [frames.length, zoom]);
+
+  useEffect(() => {
     if (!sliceSource || !sliceCanvas.current) return;
     const canvas = sliceCanvas.current;
     const image = sliceSource.image;
@@ -941,7 +967,7 @@ export default function Sprited() {
         <div className="brand">
           <div className="brand-mark"><span /><span /><span /><span /></div>
           <div className="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div>
-          <span className="version-badge">VER.0.6.0</span>
+          <span className="version-badge">VER.0.6.1</span>
         </div>
         <div className="project-title">
           <input value={projectName} onChange={(event) => { setProjectName(event.target.value); setDirty(true); }} aria-label="Project name" />
@@ -1044,7 +1070,7 @@ export default function Sprited() {
               <button onClick={() => setZoom((value) => clamp(value + 0.1, 0.1, 4))}>＋</button>
             </div>
           </div>
-          <div ref={stageRef} className="canvas-stage">
+          <div ref={stageRef} className="canvas-stage" title="Ctrl + mouse wheel to zoom">
             {!frames.length ? (
               <div className="empty-state">
                 <div className="empty-art"><div className="mini-sheet"><i /><i /><i /><i /></div><b>✦</b></div>
