@@ -6,7 +6,7 @@
   const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const images = new Map();
   const state = {
-    projectName: "Untitled Animation", frames: [], selectedId: null, referenceId: null,
+    projectName: "Untitled Animation", frames: [], selectedId: null, selectedIds: [], selectionAnchorId: null, referenceId: null,
     canvasWidth: 512, canvasHeight: 512, groundRatio: .88, fps: 12, loop: true,
     playing: false, zoom: 1, tool: "move", grid: true, ground: true, bounds: true,
     sliceImage: null, sliceName: "", history: [], future: []
@@ -33,12 +33,18 @@
     return {
       version: 1, projectName: state.projectName,
       frames: state.frames.map((f) => ({ ...f, charBounds: { ...f.charBounds }, alphaBounds: { ...f.alphaBounds } })),
-      selectedId: state.selectedId, referenceId: state.referenceId, canvasWidth: state.canvasWidth,
+      selectedId: state.selectedId, selectedIds: [...state.selectedIds], selectionAnchorId: state.selectionAnchorId,
+      referenceId: state.referenceId, canvasWidth: state.canvasWidth,
       canvasHeight: state.canvasHeight, groundRatio: state.groundRatio, fps: state.fps, loop: state.loop
     };
   }
   function restore(data) {
-    stop(); Object.assign(state, data, { frames: data.frames || [], playing: false });
+    stop(); Object.assign(state, data, {
+      frames: data.frames || [],
+      selectedIds: data.selectedIds?.length ? data.selectedIds : (data.selectedId ? [data.selectedId] : []),
+      selectionAnchorId: data.selectionAnchorId || data.selectedId || null,
+      playing: false
+    });
     images.clear(); syncInputs(); renderAll();
   }
   function commit() {
@@ -133,7 +139,7 @@
   function escapeHtml(value) { const e = document.createElement("span"); e.textContent = value; return e.innerHTML; }
   function renderFrames() {
     $("#framesList").innerHTML = state.frames.map((f, i) => `
-      <button class="frame-item ${f.id === state.selectedId ? "selected" : ""}" data-id="${f.id}" draggable="true">
+      <button class="frame-item ${state.selectedIds.includes(f.id) ? "selected" : ""} ${f.id === state.selectedId ? "active-frame" : ""}" data-id="${f.id}" draggable="true">
         <span class="drag-handle">⠿</span><span class="thumb checker"><img src="${f.src}" alt=""></span>
         <span class="frame-copy"><strong>${escapeHtml(f.name || `Frame ${i+1}`)}</strong><small>${f.sourceWidth} × ${f.sourceHeight} · ${f.duration} ms</small>
         <em><i></i>${f.id === state.referenceId ? "REFERENCE" : "READY"}</em></span>
@@ -147,8 +153,30 @@
     $("#timeReadout").textContent = `${String(Math.floor(ms/60000)).padStart(2,"0")}:${String(Math.floor(ms%60000/1000)).padStart(2,"0")}.${String(ms%1000).padStart(3,"0")}`;
     $$("#framesList .frame-item").forEach((el) => {
       el.onclick = (event) => {
-        if (event.target.closest(".star")) { commit(); state.referenceId = el.dataset.id; }
-        state.selectedId = el.dataset.id; renderAll();
+        const id = el.dataset.id;
+        if (event.target.closest(".star")) {
+          commit(); state.referenceId = id; state.selectedId = id; state.selectedIds = [id]; state.selectionAnchorId = id;
+          renderAll(); return;
+        }
+        if (event.shiftKey) {
+          const anchorId = state.selectionAnchorId || state.selectedId || id;
+          const anchorIndex = Math.max(0, state.frames.findIndex((f) => f.id === anchorId));
+          const clickedIndex = state.frames.findIndex((f) => f.id === id);
+          const start = Math.min(anchorIndex, clickedIndex), end = Math.max(anchorIndex, clickedIndex);
+          state.selectedIds = state.frames.slice(start, end + 1).map((f) => f.id);
+          state.selectedId = id;
+        } else if (event.ctrlKey || event.metaKey) {
+          state.selectedIds = state.selectedIds.includes(id)
+            ? state.selectedIds.filter((selectedId) => selectedId !== id)
+            : [...state.selectedIds, id];
+          state.selectedId = state.selectedIds.includes(id)
+            ? id
+            : (state.selectedIds[state.selectedIds.length - 1] || null);
+          state.selectionAnchorId = id;
+        } else {
+          state.selectedId = id; state.selectedIds = [id]; state.selectionAnchorId = id;
+        }
+        renderAll();
       };
       el.ondragstart = () => draggedId = el.dataset.id;
       el.ondragover = (event) => event.preventDefault();
@@ -158,12 +186,18 @@
         const [moved] = state.frames.splice(from, 1); state.frames.splice(to, 0, moved); draggedId = null; renderAll();
       };
     });
-    $$("#timelineFrames button").forEach((el) => el.onclick = () => { state.selectedId = el.dataset.id; renderAll(); });
+    $$("#timelineFrames button").forEach((el) => el.onclick = () => {
+      state.selectedId = el.dataset.id; state.selectedIds = [el.dataset.id]; state.selectionAnchorId = el.dataset.id; renderAll();
+    });
+    const selectionCount = state.selectedIds.length;
+    $("#deleteBtn").textContent = selectionCount > 1 ? `Delete ${selectionCount} frames` : "Delete frame";
   }
   function renderInspector() {
     const f = selected(), i = state.frames.indexOf(f);
     $("#inspectorEmpty").classList.toggle("hidden", !!f); $("#inspector").classList.toggle("hidden", !f); $("#resetBtn").disabled = !f;
-    $("#inspectorTitle").textContent = f ? `Frame ${i+1}` : "No frame selected";
+    $("#inspectorTitle").textContent = f
+      ? `Frame ${i+1}${state.selectedIds.length > 1 ? ` · ${state.selectedIds.length} selected` : ""}`
+      : "No frame selected";
     if (!f) return;
     $("#propX").value = Math.round(f.x*100)/100; $("#propY").value = Math.round(f.y*100)/100;
     $("#propScale").value = Math.round(f.scale*1000)/1000; $("#propRotation").value = f.rotation;
@@ -186,7 +220,11 @@
     const list = [...files].filter((f) => f.type.startsWith("image/")); if (!list.length) return;
     commit(); status(`Importing ${list.length} frames…`); const created = [];
     for (const file of list) created.push(await makeFrame(await readDataUrl(file), file.name.replace(/\.[^.]+$/,"")));
-    state.frames.push(...created); state.selectedId ||= created[0].id; state.referenceId ||= created[0].id;
+    state.frames.push(...created);
+    if (!state.selectedId) {
+      state.selectedId = created[0].id; state.selectedIds = [created[0].id]; state.selectionAnchorId = created[0].id;
+    }
+    state.referenceId ||= created[0].id;
     status("Frames imported"); renderAll(); fitZoom(); toast(`${created.length} frames imported`, "success");
   }
   async function openSlicer(file) {
@@ -211,7 +249,11 @@
     const g=sliceGeometry(); if(g.cellW<1||g.cellH<1)return toast("The grid does not fit the image","error");
     commit(); status("Slicing sprite sheet…"); const created=[];
     for(let r=0;r<g.rows;r++)for(let col=0;col<g.cols;col++){const c=document.createElement("canvas");c.width=g.cellW;c.height=g.cellH;c.getContext("2d").drawImage(state.sliceImage,g.marginX+col*(g.cellW+g.gapX),g.marginY+r*(g.cellH+g.gapY),g.cellW,g.cellH,0,0,g.cellW,g.cellH);created.push(await makeFrame(c.toDataURL("image/png"),`${state.sliceName} ${String(created.length+1).padStart(2,"0")}`))}
-    state.frames.push(...created);state.selectedId ||= created[0]?.id;state.referenceId ||= created[0]?.id;$("#sliceModal").classList.add("hidden");status("Sprite sheet sliced");renderAll();fitZoom();toast(`${created.length} frames created`,"success");
+    state.frames.push(...created);
+    if (!state.selectedId && created[0]) {
+      state.selectedId=created[0].id;state.selectedIds=[created[0].id];state.selectionAnchorId=created[0].id;
+    }
+    state.referenceId ||= created[0]?.id;$("#sliceModal").classList.add("hidden");status("Sprite sheet sliced");renderAll();fitZoom();toast(`${created.length} frames created`,"success");
   }
   function centerPatch(f){const b=renderedBounds(f);return{x:f.x+state.canvasWidth/2-(b.x+b.w/2)}}
   function groundPatch(f,target=state.canvasHeight*state.groundRatio){const b=renderedBounds(f);return{y:f.y+target-(b.y+b.h)}}
@@ -230,6 +272,23 @@
     images.clear();status("Background removed");renderAll();toast("Background removed","success");
   }
   function fitFrame(){const f=selected();if(!f)return;commit();const b=f.alphaBounds,scale=Math.min(state.canvasWidth*.88/b.w,state.canvasHeight*.88/b.h,1),tmp={...f,scale,x:0,y:0},rb=renderedBounds(tmp);Object.assign(f,{scale,x:state.canvasWidth/2-(rb.x+rb.w/2),y:state.canvasHeight/2-(rb.y+rb.h/2)});renderAll()}
+  function deleteSelection() {
+    const ids = state.selectedIds.length
+      ? [...state.selectedIds]
+      : (state.selectedId ? [state.selectedId] : []);
+    if (!ids.length) return;
+    commit();
+    const selectedSet = new Set(ids);
+    const firstIndex = Math.max(0, state.frames.findIndex((f) => selectedSet.has(f.id)));
+    state.frames = state.frames.filter((f) => !selectedSet.has(f.id));
+    if (selectedSet.has(state.referenceId)) state.referenceId = state.frames[0]?.id || null;
+    const next = state.frames[Math.min(firstIndex, state.frames.length - 1)] || null;
+    state.selectedId = next?.id || null;
+    state.selectedIds = next ? [next.id] : [];
+    state.selectionAnchorId = next?.id || null;
+    renderAll();
+    toast(`${ids.length} frame${ids.length === 1 ? "" : "s"} deleted`, "success");
+  }
   function step(dir){if(!state.frames.length)return;const i=Math.max(0,state.frames.findIndex(f=>f.id===state.selectedId)),n=state.loop?(i+dir+state.frames.length)%state.frames.length:clamp(i+dir,0,state.frames.length-1);state.selectedId=state.frames[n].id;renderAll()}
   function stop(){state.playing=false;clearTimeout(playTimer);$("#playBtn").textContent="▶"}
   function play(){if(!state.frames.length)return;state.playing=!state.playing;$("#playBtn").textContent=state.playing?"Ⅱ":"▶";if(state.playing)playStep();else stop()}
@@ -251,9 +310,9 @@
     $("#saveBtn").onclick=saveProject;$("#newBtn").onclick=()=>{if(state.frames.length&&!confirm("Start a new project? Unsaved work will be cleared."))return;restore({version:1,projectName:"Untitled Animation",frames:[],selectedId:null,referenceId:null,canvasWidth:512,canvasHeight:512,groundRatio:.88,fps:12,loop:true});state.history=[];state.future=[]};
     $("#undoBtn").onclick=undo;$("#redoBtn").onclick=redo;
     $("#exportBtn").onclick=()=>{$("#exportPrefix").value=state.projectName==="Untitled Animation"?"animation":state.projectName;updateExport();$("#exportModal").classList.remove("hidden")};
-    $("#firstBtn").onclick=()=>{if(state.frames[0]){state.selectedId=state.frames[0].id;renderAll()}};$("#reverseBtn").onclick=()=>{if(state.frames.length>1){commit();state.frames.reverse();renderAll()}};
+    $("#firstBtn").onclick=()=>{if(state.frames[0]){state.selectedId=state.frames[0].id;state.selectedIds=[state.frames[0].id];state.selectionAnchorId=state.frames[0].id;renderAll()}};$("#reverseBtn").onclick=()=>{if(state.frames.length>1){commit();state.frames.reverse();renderAll()}};
     $("#duplicateBtn").onclick=()=>{const f=selected();if(!f)return;commit();const copy={...f,id:uid(),name:`${f.name} copy`,charBounds:{...f.charBounds},alphaBounds:{...f.alphaBounds}},i=state.frames.indexOf(f);state.frames.splice(i+1,0,copy);state.selectedId=copy.id;renderAll()};
-    $("#deleteBtn").onclick=()=>{const f=selected();if(!f)return;commit();const i=state.frames.indexOf(f);state.frames.splice(i,1);if(state.referenceId===f.id)state.referenceId=state.frames[0]?.id||null;state.selectedId=state.frames[Math.min(i,state.frames.length-1)]?.id||null;renderAll()};
+    $("#deleteBtn").onclick=deleteSelection;
     bindNumber("#propX",v=>{const f=selected();commit();f.x=v;renderAll()});bindNumber("#propY",v=>{const f=selected();commit();f.y=v;renderAll()});bindNumber("#propScale",v=>{const f=selected();commit();f.scale=clamp(v,.05,10);renderAll()});bindNumber("#propRotation",v=>{const f=selected();commit();f.rotation=v;renderAll()});
     [["#boundX","x"],["#boundY","y"],["#boundW","w"],["#boundH","h"]].forEach(([id,key])=>bindNumber(id,v=>{const f=selected();commit();f.charBounds[key]=["w","h"].includes(key)?Math.max(1,v):v;renderAll()}));
     bindNumber("#durationInput",v=>{const f=selected();commit();f.duration=Math.max(10,v);renderAll()});
@@ -275,7 +334,17 @@
     canvas.onpointerdown=e=>{const f=selected();if(!f)return;commit();const r=canvas.getBoundingClientRect(),p={x:(e.clientX-r.left)/r.width*state.canvasWidth,y:(e.clientY-r.top)/r.height*state.canvasHeight};pointerDrag={p,x:f.x,y:f.y,b:{...f.charBounds}};canvas.setPointerCapture(e.pointerId)};
     canvas.onpointermove=e=>{const f=selected();if(!f||!pointerDrag)return;const r=canvas.getBoundingClientRect(),p={x:(e.clientX-r.left)/r.width*state.canvasWidth,y:(e.clientY-r.top)/r.height*state.canvasHeight},dx=p.x-pointerDrag.p.x,dy=p.y-pointerDrag.p.y;if(state.tool==="move"){f.x=pointerDrag.x+dx;f.y=pointerDrag.y+dy}else{f.charBounds.x=pointerDrag.b.x+dx/f.scale;f.charBounds.y=pointerDrag.b.y+dy/f.scale}renderInspector();renderCanvas()};canvas.onpointerup=()=>pointerDrag=null;
     window.ondragover=e=>e.preventDefault();window.ondrop=e=>{e.preventDefault();const fs=[...e.dataTransfer.files].filter(f=>f.type.startsWith("image/"));if(fs.length===1)openSlicer(fs[0]);else importFrames(fs)};
-    window.onkeydown=e=>{const typing=["INPUT","TEXTAREA"].includes(document.activeElement?.tagName);if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo()}else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="y"){e.preventDefault();redo()}else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){e.preventDefault();saveProject()}else if(!typing&&e.code==="Space"){e.preventDefault();play()}else if(!typing&&e.key==="ArrowRight")step(1);else if(!typing&&e.key==="ArrowLeft")step(-1)};
+    window.onkeydown=e=>{
+      const typing=["INPUT","TEXTAREA"].includes(document.activeElement?.tagName);
+      const modalOpen = Boolean(document.querySelector(".modal-backdrop:not(.hidden)"));
+      if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo()}
+      else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="y"){e.preventDefault();redo()}
+      else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){e.preventDefault();saveProject()}
+      else if(!typing&&!modalOpen&&e.key==="Delete"){e.preventDefault();deleteSelection()}
+      else if(!typing&&e.code==="Space"){e.preventDefault();play()}
+      else if(!typing&&e.key==="ArrowRight")step(1);
+      else if(!typing&&e.key==="ArrowLeft")step(-1)
+    };
   }
   bind(); syncInputs(); renderAll();
 })();

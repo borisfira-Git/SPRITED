@@ -31,6 +31,8 @@ type ProjectData = {
   projectName: string;
   frames: Frame[];
   selectedId: string | null;
+  selectedIds?: string[];
+  selectionAnchorId?: string | null;
   referenceId: string | null;
   canvasWidth: number;
   canvasHeight: number;
@@ -151,6 +153,8 @@ export default function AnimaSprite() {
   const [projectName, setProjectName] = useState("Untitled Animation");
   const [frames, setFrames] = useState<Frame[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectionAnchorId, setSelectionAnchorId] = useState<string | null>(null);
   const [referenceId, setReferenceId] = useState<string | null>(null);
   const [canvasWidth, setCanvasWidth] = useState(512);
   const [canvasHeight, setCanvasHeight] = useState(512);
@@ -206,6 +210,8 @@ export default function AnimaSprite() {
         alphaBounds: { ...frame.alphaBounds },
       })),
       selectedId,
+      selectedIds,
+      selectionAnchorId,
       referenceId,
       canvasWidth,
       canvasHeight,
@@ -213,7 +219,7 @@ export default function AnimaSprite() {
       fps,
       loop,
     }),
-    [projectName, frames, selectedId, referenceId, canvasWidth, canvasHeight, groundRatio, fps, loop],
+    [projectName, frames, selectedId, selectedIds, selectionAnchorId, referenceId, canvasWidth, canvasHeight, groundRatio, fps, loop],
   );
 
   const restore = useCallback((data: Snapshot) => {
@@ -221,6 +227,8 @@ export default function AnimaSprite() {
     setProjectName(data.projectName || "Untitled Animation");
     setFrames(data.frames || []);
     setSelectedId(data.selectedId || data.frames?.[0]?.id || null);
+    setSelectedIds(data.selectedIds?.length ? data.selectedIds : data.selectedId ? [data.selectedId] : []);
+    setSelectionAnchorId(data.selectionAnchorId || data.selectedId || null);
     setReferenceId(data.referenceId || data.frames?.[0]?.id || null);
     setCanvasWidth(data.canvasWidth || 512);
     setCanvasHeight(data.canvasHeight || 512);
@@ -385,6 +393,9 @@ export default function AnimaSprite() {
         stepFrame(1);
       } else if (!typing && event.key === "ArrowLeft") {
         stepFrame(-1);
+      } else if (!typing && event.key === "Delete") {
+        event.preventDefault();
+        deleteSelection();
       }
     }
     window.addEventListener("keydown", onKey);
@@ -460,6 +471,10 @@ export default function AnimaSprite() {
     }
     setFrames((items) => [...items, ...created]);
     setSelectedId((value) => value || created[0].id);
+    if (!selectedId && created[0]) {
+      setSelectedIds([created[0].id]);
+      setSelectionAnchorId(created[0].id);
+    }
     setReferenceId((value) => value || created[0].id);
     setStatus("Frames imported");
     showToast(`${created.length} frames imported`, "success");
@@ -519,6 +534,10 @@ export default function AnimaSprite() {
     }
     setFrames((items) => [...items, ...created]);
     setSelectedId((value) => value || created[0]?.id || null);
+    if (!selectedId && created[0]) {
+      setSelectedIds([created[0].id]);
+      setSelectionAnchorId(created[0].id);
+    }
     setReferenceId((value) => value || created[0]?.id || null);
     setSliceSource(null);
     setStatus("Sprite sheet sliced");
@@ -807,6 +826,8 @@ export default function AnimaSprite() {
     setProjectName("Untitled Animation");
     setFrames([]);
     setSelectedId(null);
+    setSelectedIds([]);
+    setSelectionAnchorId(null);
     setReferenceId(null);
     setCanvasWidth(512);
     setCanvasHeight(512);
@@ -816,6 +837,31 @@ export default function AnimaSprite() {
     setHistory([]);
     setFuture([]);
     setDirty(false);
+  }
+
+  function deleteSelection() {
+    const ids = selectedIds.length
+      ? selectedIds
+      : selectedId
+        ? [selectedId]
+        : [];
+    if (!ids.length) return;
+    pushHistory();
+    const selectedSet = new Set(ids);
+    const firstIndex = Math.max(
+      0,
+      frames.findIndex((frame) => selectedSet.has(frame.id)),
+    );
+    const remaining = frames.filter((frame) => !selectedSet.has(frame.id));
+    const next = remaining[Math.min(firstIndex, remaining.length - 1)] || null;
+    setFrames(remaining);
+    if (referenceId && selectedSet.has(referenceId)) {
+      setReferenceId(remaining[0]?.id || null);
+    }
+    setSelectedId(next?.id || null);
+    setSelectedIds(next ? [next.id] : []);
+    setSelectionAnchorId(next?.id || null);
+    showToast(`${ids.length} frame${ids.length === 1 ? "" : "s"} deleted`, "success");
   }
 
   function canvasPoint(event: ReactPointerEvent<HTMLCanvasElement>) {
@@ -923,7 +969,7 @@ export default function AnimaSprite() {
             <button onClick={() => framesInput.current?.click()}><span>◇</span><div><strong>Separate Frames</strong><small>Add PNG images</small></div></button>
           </div>
           <div className="list-tools">
-            <button onClick={() => frames[0] && setSelectedId(frames[0].id)}>First</button>
+            <button onClick={() => { if (frames[0]) { setSelectedId(frames[0].id); setSelectedIds([frames[0].id]); setSelectionAnchorId(frames[0].id); } }}>First</button>
             <button onClick={() => { if (frames.length > 1) { pushHistory(); setFrames((items) => [...items].reverse()); } }}>Reverse</button>
             <button onClick={() => { if (!selected) return; pushHistory(); const copy = { ...selected, id: uid(), name: `${selected.name} copy`, charBounds: { ...selected.charBounds } }; setFrames((items) => { const index = items.findIndex((item) => item.id === selected.id); const next = [...items]; next.splice(index + 1, 0, copy); return next; }); setSelectedId(copy.id); }}>Duplicate</button>
           </div>
@@ -931,12 +977,33 @@ export default function AnimaSprite() {
             {frames.map((frame, index) => (
               <button
                 key={frame.id}
-                className={`frame-item ${selectedId === frame.id ? "selected" : ""}`}
+                className={`frame-item ${selectedIds.includes(frame.id) ? "selected" : ""} ${selectedId === frame.id ? "active-frame" : ""}`}
                 draggable
                 onDragStart={() => setDragId(frame.id)}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={() => reorder(frame.id)}
-                onClick={() => setSelectedId(frame.id)}
+                onClick={(event) => {
+                  if (event.shiftKey) {
+                    const anchorId = selectionAnchorId || selectedId || frame.id;
+                    const anchorIndex = Math.max(0, frames.findIndex((item) => item.id === anchorId));
+                    const clickedIndex = frames.findIndex((item) => item.id === frame.id);
+                    const start = Math.min(anchorIndex, clickedIndex);
+                    const end = Math.max(anchorIndex, clickedIndex);
+                    setSelectedIds(frames.slice(start, end + 1).map((item) => item.id));
+                    setSelectedId(frame.id);
+                  } else if (event.ctrlKey || event.metaKey) {
+                    const next = selectedIds.includes(frame.id)
+                      ? selectedIds.filter((id) => id !== frame.id)
+                      : [...selectedIds, frame.id];
+                    setSelectedIds(next);
+                    setSelectedId(next.includes(frame.id) ? frame.id : next[next.length - 1] || null);
+                    setSelectionAnchorId(frame.id);
+                  } else {
+                    setSelectedId(frame.id);
+                    setSelectedIds([frame.id]);
+                    setSelectionAnchorId(frame.id);
+                  }
+                }}
               >
                 <span className="drag-handle">⠿</span>
                 <span className="thumb checker"><img src={frame.src} alt="" /></span>
@@ -948,14 +1015,14 @@ export default function AnimaSprite() {
                 <span
                   role="button"
                   className={referenceId === frame.id ? "star active" : "star"}
-                  onClick={(event) => { event.stopPropagation(); pushHistory(); setReferenceId(frame.id); setSelectedId(frame.id); }}
+                  onClick={(event) => { event.stopPropagation(); pushHistory(); setReferenceId(frame.id); setSelectedId(frame.id); setSelectedIds([frame.id]); setSelectionAnchorId(frame.id); }}
                 >★</span>
               </button>
             ))}
           </div>
           <div className="frames-footer">
             <span>Drag to reorder</span>
-            <button onClick={() => { if (!selected) return; pushHistory(); const index = frames.indexOf(selected); const next = frames.filter((frame) => frame.id !== selected.id); setFrames(next); setSelectedId(next[Math.min(index, next.length - 1)]?.id || null); if (referenceId === selected.id) setReferenceId(next[0]?.id || null); }}>Delete frame</button>
+            <button onClick={deleteSelection}>{selectedIds.length > 1 ? `Delete ${selectedIds.length} frames` : "Delete frame"}</button>
           </div>
         </aside>
 
@@ -1004,7 +1071,7 @@ export default function AnimaSprite() {
 
         <aside className="right-panel">
           <div className="panel-heading compact">
-            <div><span className="eyebrow">INSPECTOR</span><h2>{selected ? `Frame ${selectedIndex + 1}` : "No frame selected"}</h2></div>
+            <div><span className="eyebrow">INSPECTOR</span><h2>{selected ? `Frame ${selectedIndex + 1}${selectedIds.length > 1 ? ` · ${selectedIds.length} selected` : ""}` : "No frame selected"}</h2></div>
             <button disabled={!selected} onClick={() => { if (!selected) return; pushHistory(); updateFrame(selected.id, { x: 0, y: 0, scale: 1, rotation: 0, charBounds: { ...selected.alphaBounds } }); }}>Reset</button>
           </div>
           {!selected ? <div className="inspector-empty"><b>◇</b><p>Select a frame to edit position, size and character bounds.</p></div> : (
@@ -1061,7 +1128,7 @@ export default function AnimaSprite() {
         <div className="transport"><button onClick={() => stepFrame(-1)}>{icon("previous")}</button><button className="play" onClick={() => setPlaying((value) => !value)}>{icon(playing ? "pause" : "play")}</button><button onClick={() => stepFrame(1)}>{icon("next")}</button></div>
         <div className="timeline-settings"><NumberField label="FPS" value={fps} onCommit={(value) => { pushHistory(); const next = clamp(value, 1, 60); setFps(next); setFrames((items) => items.map((frame) => ({ ...frame, duration: Math.round(1000 / next) }))); }} /><button className={loop ? "active" : ""} onClick={() => setLoop((value) => !value)}>↻ Loop</button></div>
         <div className="timeline-frames">
-          {frames.map((frame, index) => <button key={frame.id} className={frame.id === selectedId ? "active" : ""} onClick={() => setSelectedId(frame.id)}><img src={frame.src} alt="" /><span>{index + 1}</span></button>)}
+          {frames.map((frame, index) => <button key={frame.id} className={frame.id === selectedId ? "active" : ""} onClick={() => { setSelectedId(frame.id); setSelectedIds([frame.id]); setSelectionAnchorId(frame.id); }}><img src={frame.src} alt="" /><span>{index + 1}</span></button>)}
         </div>
         <div className="timeline-readout"><strong>{frames.length ? selectedIndex + 1 : 0} / {frames.length}</strong><span>{formatTime(totalMs)}</span></div>
       </footer>

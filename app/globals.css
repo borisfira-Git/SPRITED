@@ -127,6 +127,8 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 }
 .frame-item:hover { background: #171c26; }
 .frame-item.selected { border-color: rgba(255,141,68,.55); background: linear-gradient(90deg,rgba(255,137,60,.16),rgba(255,137,60,.035)); }
+.frame-item.selected:not(.active-frame) { border-color: rgba(255,141,68,.34); background: rgba(255,137,60,.08); }
+.frame-item.active-frame { box-shadow: inset 3px 0 var(--accent); }
 .drag-handle { color: #4e5869; font-size: 11px; letter-spacing: -2px; }
 .checker {
   background-color: #c9ccd1;
