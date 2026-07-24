@@ -1,5 +1,12 @@
 # SPRITED version history
 
+## 0.6.5
+
+- Added S + mouse-wheel scaling inside the editor.
+- Wheel up enlarges and wheel down reduces the selected sprite.
+- Multiple selected frames scale together and each wheel gesture is one undo action.
+- The current Scale percentage is shown while scaling.
+
 ## 0.6.4
 
 - Turned the vertical size ruler into a draggable scale-measurement tool.

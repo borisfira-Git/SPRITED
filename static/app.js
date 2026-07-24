@@ -13,7 +13,8 @@
   };
   const canvas = $("#editorCanvas");
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  let pointerDrag = null, draggedId = null, playTimer = null;
+  let pointerDrag = null, draggedId = null, playTimer = null, scaleWheelTimer = null, scaleWheelHistoryOpen = false;
+  const keysDown = new Set();
 
   function loadImage(src) {
     if (images.has(src)) return images.get(src);
@@ -617,6 +618,17 @@
     $$("[data-tool]").forEach(b=>b.onclick=()=>{state.tool=b.dataset.tool;canvas.style.cursor=state.tool==="guides"?"crosshair":"grab";$$("[data-tool]").forEach(x=>x.classList.toggle("active",x===b))});
     $("#zoomInBtn").onclick=()=>setEditorZoom(state.zoom+.1);$("#zoomOutBtn").onclick=()=>setEditorZoom(state.zoom-.1);$("#fitBtn").onclick=fitZoom;
     $("#canvasStage").addEventListener("wheel",event=>{
+      if(keysDown.has("s")&&!event.ctrlKey&&!event.metaKey&&state.frames.length){
+        const ids=new Set(state.selectedIds.length?state.selectedIds:[state.selectedId].filter(Boolean));
+        if(!ids.size)return;
+        event.preventDefault();
+        if(!scaleWheelHistoryOpen){commit();scaleWheelHistoryOpen=true}
+        const factor=event.deltaY<0?1.05:1/1.05;
+        state.frames.forEach((frame)=>{if(ids.has(frame.id))frame.scale=clamp(frame.scale*factor,.05,10)});
+        const active=selected();renderAll();status(`Scale ${Math.round((active?.scale||1)*100)}%`);
+        clearTimeout(scaleWheelTimer);scaleWheelTimer=setTimeout(()=>{scaleWheelHistoryOpen=false},280);
+        return;
+      }
       if(!event.ctrlKey||!state.frames.length)return;
       event.preventDefault();
       const factor=event.deltaY<0?1.1:1/1.1;
@@ -674,6 +686,7 @@
     window.onkeydown=e=>{
       const typing=["INPUT","TEXTAREA"].includes(document.activeElement?.tagName);
       const modalOpen = Boolean(document.querySelector(".modal-backdrop:not(.hidden)"));
+      if(!typing)keysDown.add(e.key.toLowerCase());
       if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo()}
       else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="y"){e.preventDefault();redo()}
       else if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==="s"){e.preventDefault();saveProject()}
@@ -686,6 +699,8 @@
         if(moved){$("#saveState").textContent="Unsaved changes";renderAll();status(`Moved ${moved===1?"frame":`${moved} frames`} ${amount}px`)}
       }
     };
+    window.onkeyup=e=>keysDown.delete(e.key.toLowerCase());
+    window.addEventListener("blur",()=>{keysDown.clear();scaleWheelHistoryOpen=false;clearTimeout(scaleWheelTimer)});
   }
   bind(); syncInputs(); renderAll();
 })();

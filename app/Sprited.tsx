@@ -188,6 +188,9 @@ export default function Sprited() {
   const sheetInput = useRef<HTMLInputElement>(null);
   const framesInput = useRef<HTMLInputElement>(null);
   const projectInput = useRef<HTMLInputElement>(null);
+  const keysDown = useRef(new Set<string>());
+  const scaleWheelTimer = useRef<number | null>(null);
+  const scaleWheelHistoryOpen = useRef(false);
   const pointerDrag = useRef<null | {
     startX: number;
     startY: number;
@@ -392,6 +395,7 @@ export default function Sprited() {
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const typing = ["INPUT", "TEXTAREA"].includes((document.activeElement as HTMLElement)?.tagName);
+      if (!typing) keysDown.current.add(event.key.toLowerCase());
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
         event.preventDefault();
         event.shiftKey ? redo() : undo();
@@ -440,14 +444,60 @@ export default function Sprited() {
         deleteSelection();
       }
     }
+    const onKeyUp = (event: KeyboardEvent) => keysDown.current.delete(event.key.toLowerCase());
+    const onBlur = () => {
+      keysDown.current.clear();
+      scaleWheelHistoryOpen.current = false;
+      if (scaleWheelTimer.current) window.clearTimeout(scaleWheelTimer.current);
+    };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
   });
 
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return;
     const onWheel = (event: WheelEvent) => {
+      if (
+        keysDown.current.has("s") &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        frames.length &&
+        selectedId
+      ) {
+        event.preventDefault();
+        if (!scaleWheelHistoryOpen.current) {
+          pushHistory();
+          scaleWheelHistoryOpen.current = true;
+        }
+        const factor = event.deltaY < 0 ? 1.05 : 1 / 1.05;
+        const ids = new Set(selectedIds.length ? selectedIds : [selectedId]);
+        const activeScale = clamp(
+          (frames.find((frame) => frame.id === selectedId)?.scale || 1) * factor,
+          0.05,
+          10,
+        );
+        setFrames((items) =>
+          items.map((frame) => {
+            if (!ids.has(frame.id)) return frame;
+            const scale = clamp(frame.scale * factor, 0.05, 10);
+            return { ...frame, scale };
+          }),
+        );
+        setDirty(true);
+        setStatus(`Scale ${Math.round(activeScale * 100)}%`);
+        if (scaleWheelTimer.current) window.clearTimeout(scaleWheelTimer.current);
+        scaleWheelTimer.current = window.setTimeout(() => {
+          scaleWheelHistoryOpen.current = false;
+        }, 280);
+        return;
+      }
       if (!event.ctrlKey || !frames.length) return;
       event.preventDefault();
       const previous = zoom;
@@ -468,7 +518,7 @@ export default function Sprited() {
     };
     stage.addEventListener("wheel", onWheel, { passive: false });
     return () => stage.removeEventListener("wheel", onWheel);
-  }, [frames.length, zoom]);
+  }, [frames, pushHistory, selectedId, selectedIds, zoom]);
 
   useEffect(() => {
     if (!sliceSource || !sliceCanvas.current) return;
@@ -1009,7 +1059,7 @@ export default function Sprited() {
         <div className="brand">
           <div className="brand-mark"><span /><span /><span /><span /></div>
           <div className="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div>
-          <span className="version-badge">VER.0.6.4</span>
+          <span className="version-badge">VER.0.6.5</span>
         </div>
         <div className="project-title">
           <input value={projectName} onChange={(event) => { setProjectName(event.target.value); setDirty(true); }} aria-label="Project name" />
@@ -1112,7 +1162,7 @@ export default function Sprited() {
               <button onClick={() => setZoom((value) => clamp(value + 0.1, 0.1, 4))}>＋</button>
             </div>
           </div>
-          <div ref={stageRef} className="canvas-stage" title="Ctrl + wheel: zoom · Arrows: move · Shift + arrows: move 10px">
+          <div ref={stageRef} className="canvas-stage" title="Ctrl + wheel: zoom · S + wheel: scale sprite · Arrows: move">
             {!frames.length ? (
               <div className="empty-state">
                 <div className="empty-art"><div className="mini-sheet"><i /><i /><i /><i /></div><b>✦</b></div>
