@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Prepare, align and export sprite sheets for Godot AnimatedSprite2D.">
+  <meta property="og:title" content="AnimaSprite">
+  <meta property="og:description" content="Prepare. Align. Animate.">
+  <meta property="og:image" content="/og.png">
+  <title>AnimaSprite — Sprite Sheet Studio</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <header class="topbar">
+    <div class="brand"><div class="brand-mark"><span></span><span></span><span></span><span></span></div><div><strong>AnimaSprite</strong><small>Sprite Sheet Studio</small></div></div>
+    <div class="project-title"><input id="projectName" value="Untitled Animation" aria-label="Project name"><span id="saveState">Local project</span></div>
+    <nav class="toolbar">
+      <button id="newBtn">＋ New</button><button id="openBtn">⌁ Open</button><button id="saveBtn">↓ Save</button><i></i>
+      <button id="undoBtn" class="icon-button" aria-label="Undo">↶</button><button id="redoBtn" class="icon-button" aria-label="Redo">↷</button><i></i>
+      <button id="exportBtn" class="primary">Export</button>
+    </nav>
+  </header>
+  <main class="workspace">
+    <aside class="left-panel">
+      <div class="panel-heading"><div><span class="eyebrow">ANIMATION</span><h2>Frames <b id="frameCount">0</b></h2></div><button id="addFramesBtn" class="square-button">＋</button></div>
+      <div class="import-stack">
+        <button id="sheetBtn"><span>▦</span><div><strong>Sprite Sheet</strong><small>Slice rows & columns</small></div></button>
+        <button id="framesBtn"><span>◇</span><div><strong>Separate Frames</strong><small>Add PNG images</small></div></button>
+      </div>
+      <div class="list-tools"><button id="firstBtn">First</button><button id="reverseBtn">Reverse</button><button id="duplicateBtn">Duplicate</button></div>
+      <div id="framesList" class="frames-list"></div>
+      <div class="frames-footer"><span>Drag to reorder</span><button id="deleteBtn">Delete frame</button></div>
+    </aside>
+    <section class="editor-area">
+      <div class="editor-toolbar">
+        <div class="segmented"><button class="active" data-tool="move">Move</button><button data-tool="bounds">Character Box</button></div>
+        <div class="view-toggles"><button id="gridBtn" class="active">Grid</button><button id="groundBtn" class="active">Ground</button><button id="boundsBtn" class="active">Bounds</button></div>
+        <div class="zoom-tools"><button id="zoomOutBtn">−</button><button id="fitBtn">Fit</button><button id="zoomInBtn">＋</button></div>
+      </div>
+      <div id="canvasStage" class="canvas-stage">
+        <div id="emptyState" class="empty-state">
+          <div class="empty-art"><div class="mini-sheet"><i></i><i></i><i></i><i></i></div><b>✦</b></div>
+          <h1>Build a clean animation</h1><p>Drop a sprite sheet or separate PNG frames here.</p>
+          <div><button id="emptySheetBtn" class="primary">Import Sprite Sheet</button><button id="emptyFramesBtn">Add Frames</button></div>
+          <small>PNG · transparent or solid-color background · any frame count</small>
+        </div>
+        <div id="canvasWrap" class="canvas-wrap hidden"><canvas id="editorCanvas" class="checker" width="512" height="512" aria-label="Sprite frame editor"></canvas></div>
+      </div>
+      <div class="statusbar"><span><i></i><span id="status">Ready</span></span><span id="canvasStatus">Canvas 512 × 512</span></div>
+    </section>
+    <aside class="right-panel">
+      <div class="panel-heading compact"><div><span class="eyebrow">INSPECTOR</span><h2 id="inspectorTitle">No frame selected</h2></div><button id="resetBtn">Reset</button></div>
+      <div id="inspectorEmpty" class="inspector-empty"><b>◇</b><p>Select a frame to edit position, size and character bounds.</p></div>
+      <div id="inspector" class="hidden">
+        <section class="property-section"><button class="section-title"><span>Transform</span><span>⌃</span></button><div class="section-body">
+          <div class="field-grid"><label>Position X<input id="propX" type="number"></label><label>Position Y<input id="propY" type="number"></label><label>Scale<input id="propScale" type="number" step=".01"></label><label>Rotation<input id="propRotation" type="number"></label></div>
+          <div class="button-grid"><button id="centerBtn">Center character</button><button id="alignBtn">Align to ground</button></div>
+        </div></section>
+        <section class="property-section"><button class="section-title"><span>Character Bounds</span><span>⌃</span></button><div class="section-body">
+          <p class="helper">The orange box measures the character. Keep fire and aura outside it.</p>
+          <div class="field-grid four"><label>X<input id="boundX" type="number"></label><label>Y<input id="boundY" type="number"></label><label>W<input id="boundW" type="number"></label><label>H<input id="boundH" type="number"></label></div>
+          <div class="button-grid"><button id="detectBtn">Detect from alpha</button><button id="referenceBtn">Set as reference</button></div>
+          <button id="matchBtn" class="wide-action">Match size + ground to reference</button>
+        </div></section>
+        <section class="property-section"><button class="section-title"><span>Frame</span><span>⌃</span></button><div class="section-body">
+          <label>Duration (ms)<input id="durationInput" type="number"></label>
+          <div class="button-grid"><button id="trimBtn">Trim transparent</button><button id="fitFrameBtn">Fit safely</button></div>
+        </div></section>
+      </div>
+      <section class="property-section"><button class="section-title"><span>Canvas</span><span>⌃</span></button><div class="section-body">
+        <div class="field-grid"><label>Width<input id="canvasWidth" type="number" value="512"></label><label>Height<input id="canvasHeight" type="number" value="512"></label></div>
+        <label class="range-field"><span>Ground line <output id="groundOutput">88%</output></span><input id="groundLine" type="range" min="50" max="98" value="88"></label>
+        <button id="normalizeBtn" class="wide-action accent">Normalize all to reference</button>
+      </div></section>
+      <section class="property-section"><button class="section-title"><span>Background Removal</span><span>⌃</span></button><div class="section-body">
+        <div class="color-row"><label>Color<input id="bgColor" type="color" value="#00ff00"></label><label>Tolerance<input id="tolerance" type="number" value="52"></label></div>
+        <label class="range-field"><span>Edge softness <output id="softOutput">12</output></span><input id="softness" type="range" min="0" max="80" value="12"></label>
+        <button id="removeBgBtn" class="wide-action">Remove from selected</button><button id="removeBgAllBtn" class="wide-action subtle">Remove from all frames</button>
+      </div></section>
+    </aside>
+  </main>
+  <footer class="timeline">
+    <div class="transport"><button id="previousBtn">|◀</button><button id="playBtn" class="play">▶</button><button id="nextBtn">▶|</button></div>
+    <div class="timeline-settings"><label>FPS<input id="fpsInput" type="number" value="12"></label><button id="loopBtn" class="active">↻ Loop</button></div>
+    <div id="timelineFrames" class="timeline-frames"></div>
+    <div class="timeline-readout"><strong id="frameReadout">0 / 0</strong><span id="timeReadout">00:00.000</span></div>
+  </footer>
+</div>
+
+<div id="sliceModal" class="modal-backdrop hidden"><div class="modal large">
+  <div class="modal-header"><div><span class="eyebrow">IMPORT</span><h2>Slice Sprite Sheet</h2><p>Set the grid so every cell contains one frame.</p></div><button data-close="sliceModal">×</button></div>
+  <div class="slice-layout"><div class="slice-preview"><canvas id="sliceCanvas"></canvas></div><div>
+    <div class="field-grid"><label>Columns<input id="sliceCols" type="number" value="2" min="1"></label><label>Rows<input id="sliceRows" type="number" value="4" min="1"></label><label>Horizontal gap<input id="sliceGapX" type="number" value="0" min="0"></label><label>Vertical gap<input id="sliceGapY" type="number" value="0" min="0"></label><label>Left margin<input id="sliceMarginX" type="number" value="0" min="0"></label><label>Top margin<input id="sliceMarginY" type="number" value="0" min="0"></label></div>
+    <div class="slice-summary"><span>Cell size</span><strong id="sliceSize">—</strong><small id="sliceCount">8 frames</small></div>
+  </div></div>
+  <div class="modal-footer"><button data-close="sliceModal">Cancel</button><button id="confirmSliceBtn" class="primary">Create frames</button></div>
+</div></div>
+
+<div id="exportModal" class="modal-backdrop hidden"><div class="modal export-modal">
+  <div class="modal-header"><div><span class="eyebrow">EXPORT</span><h2>Export animation</h2><p>Create a Godot-ready sheet or individual PNG frames.</p></div><button data-close="exportModal">×</button></div>
+  <div class="export-preview"><b>▦</b><div><strong id="exportSummary">0 frames</strong><small id="exportDimensions">—</small></div></div>
+  <div class="export-fields field-grid"><label>Sheet columns<input id="exportColumns" type="number" value="4" min="1"></label><label>File prefix<input id="exportPrefix" value="animation"></label></div>
+  <div class="export-actions"><button id="exportSheetBtn" class="primary">Export Sprite Sheet</button><button id="exportFramesBtn">Export Separate Frames</button></div>
+</div></div>
+
+<div id="toast" class="toast hidden"></div>
+<input id="sheetInput" hidden type="file" accept="image/png,image/webp">
+<input id="framesInput" hidden multiple type="file" accept="image/png,image/webp">
+<input id="projectInput" hidden type="file" accept=".spriteproject,.json">
+<script src="/app.js"></script>
+</body>
+</html>
