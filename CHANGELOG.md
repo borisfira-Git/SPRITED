@@ -1,5 +1,12 @@
 # SPRITED version history
 
+## 0.6.6
+
+- Added middle-mouse drag to pan around the editor without changing sprite position.
+- Kept left-drag sprite editing, Ctrl + wheel zoom, and S + wheel sprite scaling separate.
+- Restored editor keyboard focus after minimizing and reopening the application window.
+- Added a remembered default export folder for sprite sheets, separate frames, and metadata.
+
 ## 0.6.5
 
 - Added S + mouse-wheel scaling inside the editor.

@@ -84,6 +84,64 @@ function downloadBlob(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+type WritableDirectoryHandle = FileSystemDirectoryHandle & {
+  queryPermission?: (options: { mode: "readwrite" }) => Promise<PermissionState>;
+  requestPermission?: (options: { mode: "readwrite" }) => Promise<PermissionState>;
+};
+
+function openSettingsDatabase() {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open("sprited-settings", 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("settings");
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function loadStoredExportDirectory() {
+  if (!("indexedDB" in window)) return null;
+  try {
+    const database = await openSettingsDatabase();
+    const directory = await new Promise<WritableDirectoryHandle | null>((resolve, reject) => {
+      const request = database
+        .transaction("settings")
+        .objectStore("settings")
+        .get("default-export-directory");
+      request.onsuccess = () => resolve((request.result as WritableDirectoryHandle) || null);
+      request.onerror = () => reject(request.error);
+    });
+    database.close();
+    return directory;
+  } catch {
+    return null;
+  }
+}
+
+async function storeExportDirectory(directory: WritableDirectoryHandle) {
+  if (!("indexedDB" in window)) return;
+  try {
+    const database = await openSettingsDatabase();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction("settings", "readwrite");
+      transaction.objectStore("settings").put(directory, "default-export-directory");
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    database.close();
+  } catch {}
+}
+
+async function writeDirectoryFile(
+  directory: FileSystemDirectoryHandle,
+  filename: string,
+  blob: Blob,
+) {
+  const handle = await directory.getFileHandle(filename, { create: true });
+  const writable = await handle.createWritable();
+  await writable.write(blob);
+  await writable.close();
+}
+
 async function alphaBounds(source: string | HTMLImageElement): Promise<Bounds & { empty?: boolean }> {
   const image = typeof source === "string" ? await loadImage(source) : source;
   const canvas = document.createElement("canvas");
@@ -175,6 +233,7 @@ export default function Sprited() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exportColumns, setExportColumns] = useState(4);
   const [exportPrefix, setExportPrefix] = useState("animation");
+  const [exportDirectoryName, setExportDirectoryName] = useState("Not selected — exports use Downloads");
   const [backgroundColor, setBackgroundColor] = useState("#00ff00");
   const [tolerance, setTolerance] = useState(52);
   const [softness, setSoftness] = useState(12);
@@ -188,9 +247,16 @@ export default function Sprited() {
   const sheetInput = useRef<HTMLInputElement>(null);
   const framesInput = useRef<HTMLInputElement>(null);
   const projectInput = useRef<HTMLInputElement>(null);
+  const exportDirectory = useRef<WritableDirectoryHandle | null>(null);
   const keysDown = useRef(new Set<string>());
   const scaleWheelTimer = useRef<number | null>(null);
   const scaleWheelHistoryOpen = useRef(false);
+  const viewportPan = useRef<null | {
+    startClientX: number;
+    startClientY: number;
+    scrollLeft: number;
+    scrollTop: number;
+  }>(null);
   const pointerDrag = useRef<null | {
     startX: number;
     startY: number;
@@ -202,6 +268,13 @@ export default function Sprited() {
   const selected = frames.find((frame) => frame.id === selectedId) || null;
   const reference = frames.find((frame) => frame.id === referenceId) || null;
   const selectedIndex = Math.max(0, frames.findIndex((frame) => frame.id === selectedId));
+
+  useEffect(() => {
+    void loadStoredExportDirectory().then((directory) => {
+      exportDirectory.current = directory;
+      if (directory) setExportDirectoryName(directory.name);
+    });
+  }, []);
 
   const snapshot = useCallback(
     (): Snapshot => ({
@@ -450,13 +523,26 @@ export default function Sprited() {
       scaleWheelHistoryOpen.current = false;
       if (scaleWheelTimer.current) window.clearTimeout(scaleWheelTimer.current);
     };
+    const restoreEditorFocus = () => {
+      if (
+        document.visibilityState !== "visible" ||
+        document.querySelector(".modal-backdrop")
+      ) {
+        return;
+      }
+      requestAnimationFrame(() => editorCanvas.current?.focus({ preventScroll: true }));
+    };
     window.addEventListener("keydown", onKey);
     window.addEventListener("keyup", onKeyUp);
     window.addEventListener("blur", onBlur);
+    window.addEventListener("focus", restoreEditorFocus);
+    document.addEventListener("visibilitychange", restoreEditorFocus);
     return () => {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
+      window.removeEventListener("focus", restoreEditorFocus);
+      document.removeEventListener("visibilitychange", restoreEditorFocus);
     };
   });
 
@@ -848,6 +934,42 @@ export default function Sprited() {
     };
   }
 
+  async function chooseExportDirectory() {
+    const picker = (window as Window & {
+      showDirectoryPicker?: (options: { mode: "readwrite" }) => Promise<WritableDirectoryHandle>;
+    }).showDirectoryPicker;
+    if (!picker) {
+      setExportDirectoryName("Folder selection is not supported on this system");
+      showToast("Folder selection is not supported on this system", "error");
+      return null;
+    }
+    try {
+      const directory = await picker({ mode: "readwrite" });
+      exportDirectory.current = directory;
+      setExportDirectoryName(directory.name);
+      await storeExportDirectory(directory);
+      showToast(`Default export folder: ${directory.name}`, "success");
+      return directory;
+    } catch {
+      return null;
+    }
+  }
+
+  async function writableExportDirectory() {
+    const directory = exportDirectory.current;
+    if (!directory) return null;
+    try {
+      if (!directory.queryPermission || (await directory.queryPermission({ mode: "readwrite" })) === "granted") {
+        return directory;
+      }
+      if (directory.requestPermission && (await directory.requestPermission({ mode: "readwrite" })) === "granted") {
+        return directory;
+      }
+    } catch {}
+    showToast("Please choose the export folder again", "error");
+    return null;
+  }
+
   async function exportSheet() {
     if (!frames.length) return;
     const columns = clamp(exportColumns || 1, 1, frames.length);
@@ -865,11 +987,20 @@ export default function Sprited() {
         Math.floor(index / columns) * canvasHeight,
       );
     }
-    downloadBlob(await canvasToBlob(canvas), `${safePrefix()}_${columns}x${rows}.png`);
-    downloadBlob(
-      new Blob([JSON.stringify(metadata(columns), null, 2)], { type: "application/json" }),
-      `${safePrefix()}.json`,
-    );
+    const sheetBlob = await canvasToBlob(canvas);
+    const sheetName = `${safePrefix()}_${columns}x${rows}.png`;
+    const jsonBlob = new Blob([JSON.stringify(metadata(columns), null, 2)], {
+      type: "application/json",
+    });
+    const jsonName = `${safePrefix()}.json`;
+    const directory = await writableExportDirectory();
+    if (directory) {
+      await writeDirectoryFile(directory, sheetName, sheetBlob);
+      await writeDirectoryFile(directory, jsonName, jsonBlob);
+    } else {
+      downloadBlob(sheetBlob, sheetName);
+      downloadBlob(jsonBlob, jsonName);
+    }
     setExportOpen(false);
     setStatus("Sprite sheet exported");
     showToast(`Exported ${canvas.width} × ${canvas.height} sprite sheet`, "success");
@@ -877,25 +1008,15 @@ export default function Sprited() {
 
   async function exportFrames() {
     if (!frames.length) return;
-    const picker = (window as Window & {
-      showDirectoryPicker?: (options: { mode: string }) => Promise<FileSystemDirectoryHandle>;
-    }).showDirectoryPicker;
-    let directory: FileSystemDirectoryHandle | null = null;
-    if (picker) {
-      try {
-        directory = await picker({ mode: "readwrite" });
-      } catch {
-        return;
-      }
-    }
+    const pickerSupported = Boolean((window as Window & { showDirectoryPicker?: unknown }).showDirectoryPicker);
+    let directory = await writableExportDirectory();
+    if (!directory && pickerSupported) directory = await chooseExportDirectory();
+    if (pickerSupported && !directory) return;
     for (let index = 0; index < frames.length; index += 1) {
       const blob = await canvasToBlob(await frameCanvas(frames[index]));
       const filename = `${safePrefix()}_${String(index + 1).padStart(3, "0")}.png`;
       if (directory) {
-        const handle = await directory.getFileHandle(filename, { create: true });
-        const writable = await handle.createWritable();
-        await writable.write(blob);
-        await writable.close();
+        await writeDirectoryFile(directory, filename, blob);
       } else {
         downloadBlob(blob, filename);
         await new Promise((resolve) => setTimeout(resolve, 80));
@@ -905,10 +1026,7 @@ export default function Sprited() {
       type: "application/json",
     });
     if (directory) {
-      const handle = await directory.getFileHandle(`${safePrefix()}.json`, { create: true });
-      const writable = await handle.createWritable();
-      await writable.write(json);
-      await writable.close();
+      await writeDirectoryFile(directory, `${safePrefix()}.json`, json);
     } else downloadBlob(json, `${safePrefix()}.json`);
     setExportOpen(false);
     showToast(`${frames.length} frames exported`, "success");
@@ -991,6 +1109,23 @@ export default function Sprited() {
   }
 
   function pointerDown(event: ReactPointerEvent<HTMLCanvasElement>) {
+    event.currentTarget.focus({ preventScroll: true });
+    if (event.button === 1) {
+      event.preventDefault();
+      const stage = stageRef.current;
+      if (!stage) return;
+      viewportPan.current = {
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        scrollLeft: stage.scrollLeft,
+        scrollTop: stage.scrollTop,
+      };
+      stage.classList.add("panning");
+      event.currentTarget.setPointerCapture(event.pointerId);
+      setStatus("Panning view");
+      return;
+    }
+    if (event.button !== 0) return;
     if (!selected) return;
     pushHistory();
     const point = canvasPoint(event);
@@ -1005,6 +1140,15 @@ export default function Sprited() {
   }
 
   function pointerMove(event: ReactPointerEvent<HTMLCanvasElement>) {
+    if (viewportPan.current) {
+      const stage = stageRef.current;
+      if (!stage) return;
+      stage.scrollLeft =
+        viewportPan.current.scrollLeft - (event.clientX - viewportPan.current.startClientX);
+      stage.scrollTop =
+        viewportPan.current.scrollTop - (event.clientY - viewportPan.current.startClientY);
+      return;
+    }
     if (!selected || !pointerDrag.current) return;
     const point = canvasPoint(event);
     const dx = point.x - pointerDrag.current.startX;
@@ -1020,6 +1164,13 @@ export default function Sprited() {
         y: pointerDrag.current.originalBounds!.y + dy / selected.scale,
       });
     }
+  }
+
+  function pointerEnd() {
+    if (viewportPan.current) setStatus("View moved");
+    viewportPan.current = null;
+    pointerDrag.current = null;
+    stageRef.current?.classList.remove("panning");
   }
 
   function onDrop(event: DragEvent<HTMLElement>) {
@@ -1059,7 +1210,7 @@ export default function Sprited() {
         <div className="brand">
           <div className="brand-mark"><span /><span /><span /><span /></div>
           <div className="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div>
-          <span className="version-badge">VER.0.6.5</span>
+          <span className="version-badge">VER.0.6.6</span>
         </div>
         <div className="project-title">
           <input value={projectName} onChange={(event) => { setProjectName(event.target.value); setDirty(true); }} aria-label="Project name" />
@@ -1162,7 +1313,7 @@ export default function Sprited() {
               <button onClick={() => setZoom((value) => clamp(value + 0.1, 0.1, 4))}>＋</button>
             </div>
           </div>
-          <div ref={stageRef} className="canvas-stage" title="Ctrl + wheel: zoom · S + wheel: scale sprite · Arrows: move">
+          <div ref={stageRef} className="canvas-stage" title="Middle mouse drag: pan view · Ctrl + wheel: zoom · S + wheel: scale sprite · Arrows: move">
             {!frames.length ? (
               <div className="empty-state">
                 <div className="empty-art"><div className="mini-sheet"><i /><i /><i /><i /></div><b>✦</b></div>
@@ -1179,7 +1330,10 @@ export default function Sprited() {
                   style={{ width: canvasWidth * zoom, height: canvasHeight * zoom }}
                   onPointerDown={pointerDown}
                   onPointerMove={pointerMove}
-                  onPointerUp={() => { pointerDrag.current = null; }}
+                  onPointerUp={pointerEnd}
+                  onPointerCancel={pointerEnd}
+                  onAuxClick={(event) => { if (event.button === 1) event.preventDefault(); }}
+                  tabIndex={0}
                   aria-label="Sprite frame editor"
                 />
               </div>
@@ -1202,6 +1356,7 @@ export default function Sprited() {
                   <NumberField label="Scale" value={selected.scale} step={0.01} onCommit={(value) => { pushHistory(); updateFrame(selected.id, { scale: clamp(value, 0.05, 10) }); }} />
                   <NumberField label="Rotation" value={selected.rotation} onCommit={(value) => { pushHistory(); updateFrame(selected.id, { rotation: value }); }} />
                 </div>
+                <p className="helper">Hold S and use the mouse wheel to enlarge or reduce the sprite. Drag with the middle mouse button to move the view without moving the sprite.</p>
                 <div className="button-grid">
                   <button onClick={() => { pushHistory(); updateFrame(selected.id, centerFrame(selected)); }}>Center character</button>
                   <button onClick={() => { pushHistory(); updateFrame(selected.id, groundFrame(selected)); }}>Align to ground</button>
@@ -1278,6 +1433,7 @@ export default function Sprited() {
             <div className="modal-header"><div><span className="eyebrow">EXPORT</span><h2>Export animation</h2><p>Create a Godot-ready sheet or individual PNG frames.</p></div><button onClick={() => setExportOpen(false)}>×</button></div>
             <div className="export-preview"><b>▦</b><div><strong>{frames.length} frames · {Math.min(exportColumns, Math.max(1, frames.length))} × {sheetRows} grid</strong><small>{canvasWidth * Math.min(exportColumns, Math.max(1, frames.length))} × {canvasHeight * sheetRows} px · transparent PNG</small></div></div>
             <div className="export-fields field-grid"><NumberField label="Sheet columns" value={exportColumns} onCommit={(value) => setExportColumns(Math.max(1, value))} /><label>File prefix<input value={exportPrefix} onChange={(event) => setExportPrefix(event.target.value)} /></label></div>
+            <div className="export-folder"><div><strong>Default export folder</strong><small>{exportDirectoryName}</small></div><button onClick={() => void chooseExportDirectory()}>Choose folder</button></div>
             <div className="export-actions"><button className="primary" disabled={!frames.length} onClick={() => void exportSheet()}>Export Sprite Sheet</button><button disabled={!frames.length} onClick={() => void exportFrames()}>Export Separate Frames</button></div>
           </div>
         </div>

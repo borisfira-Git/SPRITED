@@ -212,6 +212,7 @@ button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); ou
 .canvas-wrap { margin: 46px; box-shadow: 0 22px 80px rgba(0,0,0,.52); }
 .canvas-wrap canvas { display: block; cursor: grab; touch-action: none; }
 .canvas-wrap canvas:active { cursor: grabbing; }
+.canvas-stage.panning, .canvas-stage.panning canvas { cursor: grabbing !important; user-select: none; }
 .statusbar {
   display: flex; align-items: center; justify-content: space-between; padding: 0 11px;
   border-top: 1px solid var(--line); background: #1b1210; color: var(--muted-2); font-size: 8px;
@@ -332,6 +333,14 @@ input[type="color"] { width: 38px; height: 28px; margin-top: 4px; padding: 2px; 
 .export-preview strong, .export-preview small { display: block; }
 .export-preview small { margin-top: 4px; color: var(--muted); font-size: 9px; }
 .export-fields, .export-actions { margin-left: 20px; margin-right: 20px; }
+.export-folder {
+  margin: 13px 20px 0; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  border: 1px solid var(--line); border-radius: 8px; background: #1c1310;
+}
+.export-folder strong, .export-folder small { display: block; }
+.export-folder strong { color: #e3d2c3; font-size: 10px; }
+.export-folder small { max-width: 310px; margin-top: 3px; overflow: hidden; color: var(--muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.export-folder button { flex: 0 0 auto; min-height: 28px; padding: 0 10px; border: 1px solid var(--line-bright); border-radius: 6px; background: #31231d; color: #d9c6b8; font-size: 9px; }
 .export-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 18px; margin-bottom: 20px; }
 .toast {
   position: fixed; right: 17px; bottom: 120px; z-index: 200; min-width: 250px;

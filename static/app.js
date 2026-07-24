@@ -13,7 +13,7 @@
   };
   const canvas = $("#editorCanvas");
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  let pointerDrag = null, draggedId = null, playTimer = null, scaleWheelTimer = null, scaleWheelHistoryOpen = false;
+  let pointerDrag = null, draggedId = null, playTimer = null, scaleWheelTimer = null, scaleWheelHistoryOpen = false, defaultExportDirectory = null;
   const keysDown = new Set();
 
   function loadImage(src) {
@@ -71,6 +71,83 @@
   function download(blob, name) {
     const url = URL.createObjectURL(blob), a = document.createElement("a");
     a.href = url; a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function openSettingsDb() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open("sprited-settings", 1);
+      request.onupgradeneeded = () => request.result.createObjectStore("settings");
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+  async function loadDefaultExportDirectory() {
+    if (!("indexedDB" in window)) return updateExportFolderUi();
+    try {
+      const db = await openSettingsDb();
+      defaultExportDirectory = await new Promise((resolve, reject) => {
+        const request = db.transaction("settings").objectStore("settings").get("default-export-directory");
+        request.onsuccess = () => resolve(request.result || null);
+        request.onerror = () => reject(request.error);
+      });
+      db.close();
+    } catch {
+      defaultExportDirectory = null;
+    }
+    updateExportFolderUi();
+  }
+  async function storeDefaultExportDirectory(directory) {
+    defaultExportDirectory = directory;
+    if ("indexedDB" in window) {
+      try {
+        const db = await openSettingsDb();
+        await new Promise((resolve, reject) => {
+          const transaction = db.transaction("settings", "readwrite");
+          transaction.objectStore("settings").put(directory, "default-export-directory");
+          transaction.oncomplete = resolve;
+          transaction.onerror = () => reject(transaction.error);
+        });
+        db.close();
+      } catch {}
+    }
+    updateExportFolderUi();
+  }
+  function updateExportFolderUi() {
+    const label = $("#exportFolderName"), button = $("#chooseExportFolderBtn");
+    if (!label || !button) return;
+    if (!window.showDirectoryPicker) {
+      label.textContent = "Folder selection is not supported on this system";
+      button.disabled = true;
+    } else {
+      label.textContent = defaultExportDirectory ? defaultExportDirectory.name : "Not selected — exports use Downloads";
+      button.disabled = false;
+    }
+  }
+  async function chooseDefaultExportFolder() {
+    if (!window.showDirectoryPicker) return null;
+    try {
+      const directory = await window.showDirectoryPicker({ mode: "readwrite" });
+      await storeDefaultExportDirectory(directory);
+      toast(`Default export folder: ${directory.name}`, "success");
+      return directory;
+    } catch {
+      return null;
+    }
+  }
+  async function writableDefaultExportDirectory() {
+    const directory = defaultExportDirectory;
+    if (!directory) return null;
+    try {
+      if (!directory.queryPermission || await directory.queryPermission({ mode: "readwrite" }) === "granted") return directory;
+      if (directory.requestPermission && await directory.requestPermission({ mode: "readwrite" }) === "granted") return directory;
+    } catch {}
+    toast("Please choose the export folder again", "error");
+    return null;
+  }
+  async function writeDirectoryFile(directory, name, blob) {
+    const handle = await directory.getFileHandle(name, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(blob);
+    await writable.close();
   }
   function canvasBlob(c) { return new Promise((resolve) => c.toBlob(resolve, "image/png")); }
   async function alphaBounds(source) {
@@ -560,8 +637,30 @@
   }
   function prefix(){return($("#exportPrefix").value||state.projectName||"animation").trim().replace(/[^\w-]+/g,"_").replace(/^_+|_+$/g,"").toLowerCase()||"animation"}
   function metadata(cols,size){return{animation:prefix(),fps:state.fps,loop:state.loop,frame_width:size.w,frame_height:size.h,frames:state.frames.length,horizontal_frames:Math.min(cols,state.frames.length),vertical_frames:Math.ceil(state.frames.length/cols),durations_ms:state.frames.map(f=>f.duration),reference_frame:Math.max(0,state.frames.findIndex(f=>f.id===state.referenceId))}}
-  async function exportSheet(){if(!state.frames.length)return;const cols=clamp(Number($("#exportColumns").value)||1,1,state.frames.length),rows=Math.ceil(state.frames.length/cols),size=exportFrameSize(),c=document.createElement("canvas");c.width=size.w*cols;c.height=size.h*rows;const x=c.getContext("2d");x.imageSmoothingEnabled=true;x.imageSmoothingQuality="high";status("Rendering high-quality sprite sheet…");for(let i=0;i<state.frames.length;i++)x.drawImage(await renderedFrame(state.frames[i],size),i%cols*size.w,Math.floor(i/cols)*size.h);download(await canvasBlob(c),`${prefix()}_${size.w}px_${cols}x${rows}.png`);download(new Blob([JSON.stringify(metadata(cols,size),null,2)],{type:"application/json"}),`${prefix()}.json`);$("#exportModal").classList.add("hidden");status("Sprite sheet exported");toast(`Exported ${c.width} × ${c.height} sprite sheet`,"success")}
-  async function exportFrames(){if(!state.frames.length)return;const size=exportFrameSize();let dir=null;if(window.showDirectoryPicker){try{dir=await window.showDirectoryPicker({mode:"readwrite"})}catch{return}}for(let i=0;i<state.frames.length;i++){const blob=await canvasBlob(await renderedFrame(state.frames[i],size)),name=`${prefix()}_${size.w}px_${String(i+1).padStart(3,"0")}.png`;if(dir){const h=await dir.getFileHandle(name,{create:true}),w=await h.createWritable();await w.write(blob);await w.close()}else{download(blob,name);await new Promise(r=>setTimeout(r,80))}}toast(`${state.frames.length} frames exported at ${size.w} × ${size.h}`,"success");$("#exportModal").classList.add("hidden")}
+  async function exportSheet(){
+    if(!state.frames.length)return;
+    const cols=clamp(Number($("#exportColumns").value)||1,1,state.frames.length),rows=Math.ceil(state.frames.length/cols),size=exportFrameSize(),c=document.createElement("canvas");
+    c.width=size.w*cols;c.height=size.h*rows;
+    const x=c.getContext("2d");x.imageSmoothingEnabled=true;x.imageSmoothingQuality="high";status("Rendering high-quality sprite sheet…");
+    for(let i=0;i<state.frames.length;i++)x.drawImage(await renderedFrame(state.frames[i],size),i%cols*size.w,Math.floor(i/cols)*size.h);
+    const sheetBlob=await canvasBlob(c),sheetName=`${prefix()}_${size.w}px_${cols}x${rows}.png`,jsonBlob=new Blob([JSON.stringify(metadata(cols,size),null,2)],{type:"application/json"}),jsonName=`${prefix()}.json`,dir=await writableDefaultExportDirectory();
+    if(dir){await writeDirectoryFile(dir,sheetName,sheetBlob);await writeDirectoryFile(dir,jsonName,jsonBlob)}else{download(sheetBlob,sheetName);download(jsonBlob,jsonName)}
+    $("#exportModal").classList.add("hidden");status("Sprite sheet exported");toast(`Exported ${c.width} × ${c.height} sprite sheet`,"success");
+  }
+  async function exportFrames(){
+    if(!state.frames.length)return;
+    const size=exportFrameSize();
+    let dir=await writableDefaultExportDirectory();
+    if(!dir&&window.showDirectoryPicker)dir=await chooseDefaultExportFolder();
+    if(window.showDirectoryPicker&&!dir)return;
+    for(let i=0;i<state.frames.length;i++){
+      const blob=await canvasBlob(await renderedFrame(state.frames[i],size)),name=`${prefix()}_${size.w}px_${String(i+1).padStart(3,"0")}.png`;
+      if(dir)await writeDirectoryFile(dir,name,blob);else{download(blob,name);await new Promise(r=>setTimeout(r,80))}
+    }
+    const jsonBlob=new Blob([JSON.stringify(metadata($("#exportColumns").value,size),null,2)],{type:"application/json"}),jsonName=`${prefix()}.json`;
+    if(dir)await writeDirectoryFile(dir,jsonName,jsonBlob);else download(jsonBlob,jsonName);
+    toast(`${state.frames.length} frames exported at ${size.w} × ${size.h}`,"success");$("#exportModal").classList.add("hidden");
+  }
   function saveProject(){state.projectName=$("#projectName").value.trim()||"Untitled Animation";download(new Blob([JSON.stringify(snapshot())],{type:"application/json"}),`${state.projectName.replace(/[^\w-]+/g,"_").toLowerCase()}.spriteproject`);$("#saveState").textContent="Saved locally";toast("Project saved","success")}
   async function openProject(file){try{const data=JSON.parse(await file.text());if(!Array.isArray(data.frames))throw Error();state.history=[];state.future=[];restore(data);$("#saveState").textContent="Saved locally";toast("Project opened","success")}catch{toast("Could not open this project","error")}}
   function setEditorZoom(nextZoom, anchorEvent) {
@@ -591,7 +690,7 @@
     $("#openBtn").onclick=()=>$("#projectInput").click();$("#projectInput").onchange=e=>{if(e.target.files[0])openProject(e.target.files[0]);e.target.value=""};
     $("#saveBtn").onclick=saveProject;$("#newBtn").onclick=()=>{if(state.frames.length&&!confirm("Start a new project? Unsaved work will be cleared."))return;restore({version:1,projectName:"Untitled Animation",frames:[],selectedId:null,referenceId:null,canvasWidth:512,canvasHeight:512,groundRatio:.88,anchorRatio:.5,targetHeightRatio:.72,rulerBottomRatio:.88,fps:12,loop:true});state.history=[];state.future=[]};
     $("#undoBtn").onclick=undo;$("#redoBtn").onclick=redo;
-    $("#exportBtn").onclick=()=>{$("#exportPrefix").value=state.projectName==="Untitled Animation"?"animation":state.projectName;updateExport();$("#exportModal").classList.remove("hidden")};
+    $("#exportBtn").onclick=()=>{$("#exportPrefix").value=state.projectName==="Untitled Animation"?"animation":state.projectName;updateExport();updateExportFolderUi();$("#exportModal").classList.remove("hidden")};
     $("#firstBtn").onclick=()=>{if(state.frames[0]){state.selectedId=state.frames[0].id;state.selectedIds=[state.frames[0].id];state.selectionAnchorId=state.frames[0].id;renderAll()}};$("#reverseBtn").onclick=()=>{if(state.frames.length>1){commit();state.frames.reverse();renderAll()}};
     $("#duplicateBtn").onclick=()=>{const f=selected();if(!f)return;commit();const copy={...f,id:uid(),name:`${f.name} copy`,charBounds:{...f.charBounds},alphaBounds:{...f.alphaBounds}},i=state.frames.indexOf(f);state.frames.splice(i+1,0,copy);state.selectedId=copy.id;renderAll()};
     $("#deleteBtn").onclick=deleteSelection;
@@ -636,10 +735,21 @@
       status(`Zoom ${Math.round(state.zoom*100)}%`);
     },{passive:false});
     ["#sliceCols","#sliceRows","#sliceGapX","#sliceGapY","#sliceMarginX","#sliceMarginY"].forEach(id=>$(id).oninput=renderSlice);$("#confirmSliceBtn").onclick=confirmSlice;
-    $$("[data-close]").forEach(b=>b.onclick=()=>$("#"+b.dataset.close).classList.add("hidden"));$("#exportColumns").oninput=updateExport;$("#exportResolution").onchange=updateExport;$("#exportSheetBtn").onclick=exportSheet;$("#exportFramesBtn").onclick=exportFrames;
+    $$("[data-close]").forEach(b=>b.onclick=()=>$("#"+b.dataset.close).classList.add("hidden"));$("#exportColumns").oninput=updateExport;$("#exportResolution").onchange=updateExport;$("#chooseExportFolderBtn").onclick=chooseDefaultExportFolder;$("#exportSheetBtn").onclick=exportSheet;$("#exportFramesBtn").onclick=exportFrames;
     $$(".section-title").forEach(b=>b.onclick=()=>{const body=b.nextElementSibling;body.classList.toggle("hidden");b.lastElementChild.textContent=body.classList.contains("hidden")?"⌄":"⌃"});
     $("#projectName").oninput=e=>{state.projectName=e.target.value;$("#saveState").textContent="Unsaved changes"};
     canvas.onpointerdown=e=>{
+      if(e.button===1){
+        e.preventDefault();
+        canvas.focus({preventScroll:true});
+        const stage=$("#canvasStage");
+        pointerDrag={kind:"pan",clientX:e.clientX,clientY:e.clientY,scrollLeft:stage.scrollLeft,scrollTop:stage.scrollTop};
+        stage.classList.add("panning");
+        canvas.setPointerCapture(e.pointerId);
+        status("Panning view");
+        return;
+      }
+      if(e.button!==0)return;
       const r=canvas.getBoundingClientRect(),p={x:(e.clientX-r.left)/r.width*state.canvasWidth,y:(e.clientY-r.top)/r.height*state.canvasHeight};
       if(state.tool==="guides"){
         commit();
@@ -656,6 +766,12 @@
     };
     canvas.onpointermove=e=>{
       if(!pointerDrag)return;
+      if(pointerDrag.kind==="pan"){
+        const stage=$("#canvasStage");
+        stage.scrollLeft=pointerDrag.scrollLeft-(e.clientX-pointerDrag.clientX);
+        stage.scrollTop=pointerDrag.scrollTop-(e.clientY-pointerDrag.clientY);
+        return;
+      }
       const r=canvas.getBoundingClientRect(),p={x:(e.clientX-r.left)/r.width*state.canvasWidth,y:(e.clientY-r.top)/r.height*state.canvasHeight};
       if(pointerDrag.kind==="guides"){
         state.anchorRatio=clamp(p.x/state.canvasWidth,.05,.95);state.groundRatio=clamp(p.y/state.canvasHeight,.5,.98);syncInputs();renderCanvas();return;
@@ -679,9 +795,12 @@
     };
     canvas.onpointerup=()=>{
       if(pointerDrag&&["rulerTop","rulerBottom","rulerMove"].includes(pointerDrag.kind))toast(`Scale ruler: ${Math.round(state.canvasHeight*state.targetHeightRatio)} px`,"success");
+      if(pointerDrag?.kind==="pan")status("View moved");
+      $("#canvasStage").classList.remove("panning");
       pointerDrag=null;
     };
-    canvas.onpointercancel=()=>pointerDrag=null;
+    canvas.onpointercancel=()=>{$("#canvasStage").classList.remove("panning");pointerDrag=null};
+    canvas.onauxclick=e=>{if(e.button===1)e.preventDefault()};
     window.ondragover=e=>e.preventDefault();window.ondrop=e=>{e.preventDefault();const fs=[...e.dataTransfer.files].filter(f=>f.type.startsWith("image/"));if(fs.length===1)autoImport(fs[0]);else importFrames(fs)};
     window.onkeydown=e=>{
       const typing=["INPUT","TEXTAREA"].includes(document.activeElement?.tagName);
@@ -701,6 +820,12 @@
     };
     window.onkeyup=e=>keysDown.delete(e.key.toLowerCase());
     window.addEventListener("blur",()=>{keysDown.clear();scaleWheelHistoryOpen=false;clearTimeout(scaleWheelTimer)});
+    const restoreEditorFocus=()=>{
+      if(document.visibilityState!=="visible"||document.querySelector(".modal-backdrop:not(.hidden)"))return;
+      requestAnimationFrame(()=>canvas.focus({preventScroll:true}));
+    };
+    window.addEventListener("focus",restoreEditorFocus);
+    document.addEventListener("visibilitychange",restoreEditorFocus);
   }
-  bind(); syncInputs(); renderAll();
+  bind(); loadDefaultExportDirectory(); syncInputs(); renderAll();
 })();

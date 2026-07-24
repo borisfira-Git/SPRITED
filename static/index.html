@@ -13,7 +13,7 @@
 <body>
 <div class="app-shell">
   <header class="topbar">
-    <div class="brand"><div class="brand-mark"><span></span><span></span><span></span><span></span></div><div class="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div><span class="version-badge">VER.0.6.5</span></div>
+    <div class="brand"><div class="brand-mark"><span></span><span></span><span></span><span></span></div><div class="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div><span class="version-badge">VER.0.6.6</span></div>
     <div class="project-title"><input id="projectName" value="Untitled Animation" aria-label="Project name"><span id="saveState">Local project</span></div>
     <nav class="toolbar">
       <button id="newBtn">＋ New</button><button id="openBtn">⌁ Open</button><button id="saveBtn">↓ Save</button><i></i>
@@ -39,14 +39,14 @@
         <div class="view-toggles"><button id="gridBtn" class="active">Grid</button><button id="groundBtn" class="active">Ground</button><button id="guidesBtn" class="active">Ruler</button><button id="boundsBtn" class="active">Bounds</button></div>
         <div class="zoom-tools"><button id="zoomOutBtn">−</button><button id="fitBtn">Fit</button><button id="zoomInBtn">＋</button></div>
       </div>
-      <div id="canvasStage" class="canvas-stage" title="Ctrl + wheel: zoom · S + wheel: scale sprite · Arrows: move">
+      <div id="canvasStage" class="canvas-stage" title="Middle mouse drag: pan view · Ctrl + wheel: zoom · S + wheel: scale sprite · Arrows: move">
         <div id="emptyState" class="empty-state">
           <div class="empty-art"><div class="mini-sheet"><i></i><i></i><i></i><i></i></div><b>✦</b></div>
           <h1>Build a clean animation</h1><p>Automatically detect frames, remove chroma green and start editing.</p>
           <div><button id="emptyAutoBtn" class="primary">✦ Auto Import</button><button id="emptySheetBtn">Manual Grid</button><button id="emptyFramesBtn">Add Frames</button></div>
           <small>PNG · chroma green or transparent · any frame count</small>
         </div>
-        <div id="canvasWrap" class="canvas-wrap hidden"><canvas id="editorCanvas" class="checker" width="512" height="512" aria-label="Sprite frame editor"></canvas></div>
+        <div id="canvasWrap" class="canvas-wrap hidden"><canvas id="editorCanvas" class="checker" width="512" height="512" tabindex="0" aria-label="Sprite frame editor"></canvas></div>
       </div>
       <div class="statusbar"><span><i></i><span id="status">Ready</span></span><span id="canvasStatus">Canvas 512 × 512</span></div>
     </section>
@@ -58,7 +58,7 @@
           <div class="field-grid"><label>Position X<input id="propX" type="number"></label><label>Position Y<input id="propY" type="number"></label><label>Scale<input id="propScale" type="number" step=".01"></label><label>Rotation<input id="propRotation" type="number"></label></div>
           <label class="range-field scale-editor"><span>Frame size <output id="propScaleOutput">100%</output></span><input id="propScaleRange" type="range" min="5" max="400" step="1" value="100"></label>
           <div class="scale-buttons"><button id="scaleDownBtn">−10%</button><button id="scaleResetBtn">100%</button><button id="scaleUpBtn">+10%</button></div>
-          <p class="helper">Hold S and use the mouse wheel over the editor to enlarge or reduce the selected sprite.</p>
+          <p class="helper">Hold S and use the mouse wheel over the editor to enlarge or reduce the selected sprite. Drag with the middle mouse button to move the view without moving the sprite.</p>
           <div class="button-grid"><button id="centerBtn">Center character</button><button id="alignBtn">Align to ground</button></div>
         </div></section>
         <section class="property-section"><button class="section-title"><span>Character Bounds</span><span>⌃</span></button><div class="section-body">
@@ -122,6 +122,7 @@
     <label>Frame quality<select id="exportResolution"><option value="current">Current editor size</option><option value="256">256 × 256</option><option value="512">512 × 512</option><option value="1024" selected>1024 × 1024</option><option value="2048">2048 × 2048</option></select></label>
     <label class="full-field">File prefix<input id="exportPrefix" value="animation"></label>
   </div>
+  <div class="export-folder"><div><strong>Default export folder</strong><small id="exportFolderName">Not selected — exports use Downloads</small></div><button id="chooseExportFolderBtn">Choose folder</button></div>
   <div class="export-actions"><button id="exportSheetBtn" class="primary">Export Sprite Sheet</button><button id="exportFramesBtn">Export Separate Frames</button></div>
 </div></div>
 
