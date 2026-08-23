@@ -1,5 +1,13 @@
 # SPRITED version history
 
+## 0.6.8
+
+- Tested automatic sizing with the supplied `IDLEPIKA.png` eight-frame sheet.
+- Added cross-frame silhouette comparison so complete head-to-feet bounds are used when the full character remains consistent.
+- All frames now share one identical Scale and bottom-center alignment instead of being resized independently.
+- Matched the effective common-frame approach used by BrazilGPT while retaining isolated-body detection for changing effects.
+- Kept isolated-body detection for sheets whose surrounding effects change size dramatically.
+
 ## 0.6.7
 
 - Added automatic head-to-feet measurement for every frame.

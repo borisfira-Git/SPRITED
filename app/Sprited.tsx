@@ -827,7 +827,7 @@ export default function Sprited() {
   }
 
   async function prepareHeadToFeetFrames(sourceFrames = frames) {
-    const measured: Frame[] = [];
+    const measured: Array<{ frame: Frame; bodyBounds: Bounds }> = [];
     for (const frame of sourceFrames) {
       const image = await loadImage(frame.src);
       const canvas = document.createElement("canvas");
@@ -835,37 +835,49 @@ export default function Sprited() {
       canvas.height = image.naturalHeight;
       canvas.getContext("2d")!.drawImage(image, 0, 0);
       measured.push({
-        ...frame,
-        charBounds: detectBodyBounds(canvas),
-        alphaBounds: { ...frame.alphaBounds },
+        frame: { ...frame, alphaBounds: { ...frame.alphaBounds } },
+        bodyBounds: detectBodyBounds(canvas),
       });
     }
-    if (!measured.length) return [];
+    if (!measured.length) return { frames: [] as Frame[], method: "full silhouette" };
+    const heightSpread = (bounds: Bounds[]) =>
+      Math.max(...bounds.map((box) => box.h)) /
+      Math.max(1, Math.min(...bounds.map((box) => box.h)));
+    const alphaSpread = heightSpread(measured.map(({ frame }) => frame.alphaBounds));
+    const bodySpread = heightSpread(measured.map(({ bodyBounds }) => bodyBounds));
+    const useFullSilhouette = alphaSpread <= 1.12 || alphaSpread <= bodySpread * 0.9;
+    const bounded = measured.map(({ frame, bodyBounds }) => ({
+      ...frame,
+      charBounds: { ...(useFullSilhouette ? frame.alphaBounds : bodyBounds) },
+    }));
     const requestedHeight = canvasHeight * 0.72;
-    const safeHeight = Math.min(
-      ...measured.map((frame) =>
+    const masterHeight = Math.max(...bounded.map((frame) => frame.charBounds.h));
+    const requestedScale = requestedHeight / Math.max(1, masterHeight);
+    const safeScale = Math.min(
+      ...bounded.map((frame) =>
         Math.min(
-          (canvasWidth * 0.9 * frame.charBounds.h) / Math.max(1, frame.alphaBounds.w),
-          (canvasHeight * 0.9 * frame.charBounds.h) / Math.max(1, frame.alphaBounds.h),
+          (canvasWidth * 0.9) / Math.max(1, frame.alphaBounds.w),
+          (canvasHeight * 0.9) / Math.max(1, frame.alphaBounds.h),
         ),
       ),
     );
-    const targetHeight = clamp(Math.min(requestedHeight, safeHeight), canvasHeight * 0.15, canvasHeight * 0.95);
-    return measured.map((frame) => {
-      const scaled = { ...frame, scale: clamp(targetHeight / Math.max(1, frame.charBounds.h), 0.05, 10) };
+    const sharedScale = clamp(Math.min(requestedScale, safeScale), 0.05, 10);
+    const normalized = bounded.map((frame) => {
+      const scaled = { ...frame, scale: sharedScale };
       const centered = { ...scaled, ...centerFrame(scaled) };
       return { ...centered, ...groundFrame(centered) };
     });
+    return { frames: normalized, method: useFullSilhouette ? "full silhouette" : "isolated body" };
   }
 
   async function normalizeAll() {
     if (!frames.length) return;
     pushHistory();
     setStatus("Measuring every frame from head to feet…");
-    const normalized = await prepareHeadToFeetFrames();
-    setFrames(normalized);
+    const result = await prepareHeadToFeetFrames();
+    setFrames(result.frames);
     setStatus("Frames matched head to feet");
-    showToast(`Matched ${normalized.length} frames from head to feet`, "success");
+    showToast(`Matched ${result.frames.length} frames using ${result.method}`, "success");
   }
 
   async function detectBounds() {
@@ -1061,7 +1073,7 @@ export default function Sprited() {
 
   async function exportSheet() {
     if (!frames.length) return;
-    const framesToExport = uniformHeadFeet ? await prepareHeadToFeetFrames() : frames;
+    const framesToExport = uniformHeadFeet ? (await prepareHeadToFeetFrames()).frames : frames;
     const columns = clamp(exportColumns || 1, 1, frames.length);
     const rows = Math.ceil(frames.length / columns);
     const canvas = document.createElement("canvas");
@@ -1098,7 +1110,7 @@ export default function Sprited() {
 
   async function exportFrames() {
     if (!frames.length) return;
-    const framesToExport = uniformHeadFeet ? await prepareHeadToFeetFrames() : frames;
+    const framesToExport = uniformHeadFeet ? (await prepareHeadToFeetFrames()).frames : frames;
     const pickerSupported = Boolean((window as Window & { showDirectoryPicker?: unknown }).showDirectoryPicker);
     let directory = await writableExportDirectory();
     if (!directory && pickerSupported) directory = await chooseExportDirectory();
@@ -1301,7 +1313,7 @@ export default function Sprited() {
         <div className="brand">
           <div className="brand-mark"><span /><span /><span /><span /></div>
           <div className="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div>
-          <span className="version-badge">VER.0.6.7</span>
+          <span className="version-badge">VER.0.6.8</span>
         </div>
         <div className="project-title">
           <input value={projectName} onChange={(event) => { setProjectName(event.target.value); setDirty(true); }} aria-label="Project name" />
@@ -1476,7 +1488,7 @@ export default function Sprited() {
             </div>
             <label className="range-field"><span>Ground line <output>{Math.round(groundRatio * 100)}%</output></span><input type="range" min="50" max="98" value={groundRatio * 100} onChange={(event) => { setGroundRatio(Number(event.target.value) / 100); setDirty(true); }} /></label>
             <button className="wide-action accent" onClick={() => void normalizeAll()}>Auto-match head + feet</button>
-            <p className="helper">Detects the main character in every frame, ignores surrounding effects, and matches the head-to-feet height and ground line.</p>
+            <p className="helper">Uses one shared Scale for every frame, builds a common head-to-feet box, and aligns all feet to the same ground line.</p>
           </InspectorSection>
           <InspectorSection title="Background Removal">
             <div className="color-row">
@@ -1525,7 +1537,7 @@ export default function Sprited() {
             <div className="modal-header"><div><span className="eyebrow">EXPORT</span><h2>Export animation</h2><p>Create a Godot-ready sheet or individual PNG frames.</p></div><button onClick={() => setExportOpen(false)}>×</button></div>
             <div className="export-preview"><b>▦</b><div><strong>{frames.length} frames · {Math.min(exportColumns, Math.max(1, frames.length))} × {sheetRows} grid</strong><small>{canvasWidth * Math.min(exportColumns, Math.max(1, frames.length))} × {canvasHeight * sheetRows} px · transparent PNG</small></div></div>
             <div className="export-fields field-grid"><NumberField label="Sheet columns" value={exportColumns} onCommit={(value) => setExportColumns(Math.max(1, value))} /><label>File prefix<input value={exportPrefix} onChange={(event) => setExportPrefix(event.target.value)} /></label></div>
-            <label className="export-option"><input type="checkbox" checked={uniformHeadFeet} onChange={(event) => setUniformHeadFeet(event.target.checked)} /><span><strong>Match every frame head to feet</strong><small>Recommended — keeps character size and ground position uniform while ignoring surrounding effects.</small></span></label>
+            <label className="export-option"><input type="checkbox" checked={uniformHeadFeet} onChange={(event) => setUniformHeadFeet(event.target.checked)} /><span><strong>Lock one Scale + align feet</strong><small>Recommended — all frames use one shared Scale, a common frame box and the same bottom-center pivot.</small></span></label>
             <div className="export-folder"><div><strong>Default export folder</strong><small>{exportDirectoryName}</small></div><button onClick={() => void chooseExportDirectory()}>Choose folder</button></div>
             <div className="export-actions"><button className="primary" disabled={!frames.length} onClick={() => void exportSheet()}>Export Sprite Sheet</button><button disabled={!frames.length} onClick={() => void exportFrames()}>Export Separate Frames</button></div>
           </div>

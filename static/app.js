@@ -337,21 +337,28 @@
     for(const frame of sourceFrames){
       const image=await loadImage(frame.src),c=document.createElement("canvas");
       c.width=image.naturalWidth;c.height=image.naturalHeight;c.getContext("2d").drawImage(image,0,0);
-      measured.push({...frame,charBounds:detectBodyBounds(c),alphaBounds:{...frame.alphaBounds}});
+      measured.push({frame:{...frame,alphaBounds:{...frame.alphaBounds}},bodyBounds:detectBodyBounds(c)});
     }
     if(!measured.length)return{frames:[],targetHeight:0};
+    const heightSpread=(bounds)=>Math.max(...bounds.map((b)=>b.h))/Math.max(1,Math.min(...bounds.map((b)=>b.h)));
+    const alphaSpread=heightSpread(measured.map(({frame})=>frame.alphaBounds)),bodySpread=heightSpread(measured.map(({bodyBounds})=>bodyBounds));
+    const useFullSilhouette=alphaSpread<=1.12||alphaSpread<=bodySpread*.9;
+    const bounded=measured.map(({frame,bodyBounds})=>({...frame,charBounds:{...(useFullSilhouette?frame.alphaBounds:bodyBounds)}}));
     const requestedHeight=state.canvasHeight*state.targetHeightRatio;
-    const safeHeight=Math.min(...measured.map((frame)=>Math.min(
-      state.canvasWidth*.9*frame.charBounds.h/Math.max(1,frame.alphaBounds.w),
-      state.canvasHeight*.9*frame.charBounds.h/Math.max(1,frame.alphaBounds.h)
+    const masterHeight=Math.max(...bounded.map((frame)=>frame.charBounds.h));
+    const requestedScale=requestedHeight/Math.max(1,masterHeight);
+    const safeScale=Math.min(...bounded.map((frame)=>Math.min(
+      state.canvasWidth*.9/Math.max(1,frame.alphaBounds.w),
+      state.canvasHeight*.9/Math.max(1,frame.alphaBounds.h)
     )));
-    const targetHeight=clamp(Math.min(requestedHeight,safeHeight),state.canvasHeight*.15,state.canvasHeight*.95);
-    const normalized=measured.map((frame)=>{
-      const scaled={...frame,scale:clamp(targetHeight/Math.max(1,frame.charBounds.h),.05,10)};
+    const sharedScale=clamp(Math.min(requestedScale,safeScale),.05,10);
+    const targetHeight=masterHeight*sharedScale;
+    const normalized=bounded.map((frame)=>{
+      const scaled={...frame,scale:sharedScale};
       const centered={...scaled,...centerPatch(scaled)};
       return{...centered,...groundPatch(centered)};
     });
-    return{frames:normalized,targetHeight};
+    return{frames:normalized,targetHeight,sharedScale,method:useFullSilhouette?"full silhouette":"isolated body"};
   }
   async function autoImport(file) {
     if(!file)return;
@@ -360,16 +367,14 @@
       const src=await readDataUrl(file),image=await loadImage(src),key=sampleBackground(image),grid=detectAutoGrid(image,key);
       const full=document.createElement("canvas");full.width=image.naturalWidth;full.height=image.naturalHeight;full.getContext("2d").drawImage(image,0,0);removeChromaFromCanvas(full,key);
       const objects=extractObjectFrames(full,grid);commit();const created=[],base=file.name.replace(/\.[^.]+$/,"");
-      for(const object of objects){const bodyBounds=detectBodyBounds(object),frame=await makeFrame(object.toDataURL("image/png"),`${base} ${String(created.length+1).padStart(2,"0")}`);frame.charBounds=bodyBounds;created.push(frame)}
+      for(const object of objects){created.push(await makeFrame(object.toDataURL("image/png"),`${base} ${String(created.length+1).padStart(2,"0")}`))}
       if(!created.length)throw new Error("No frames detected");
-      const requestedBodyHeight=state.canvasHeight*state.targetHeightRatio;
-      const safeBodyHeight=Math.min(...created.map((frame)=>Math.min(state.canvasWidth*.9*frame.charBounds.h/Math.max(1,frame.alphaBounds.w),state.canvasHeight*.9*frame.charBounds.h/Math.max(1,frame.alphaBounds.h))));
-      const bodyHeight=clamp(Math.min(requestedBodyHeight,safeBodyHeight),state.canvasHeight*.15,state.canvasHeight*.95);state.targetHeightRatio=bodyHeight/state.canvasHeight;state.rulerBottomRatio=clamp(state.rulerBottomRatio,state.targetHeightRatio+.01,.99);
-      created.forEach((frame)=>{frame.scale=clamp(bodyHeight/Math.max(1,frame.charBounds.h),.05,10);Object.assign(frame,centerPatch(frame));Object.assign(frame,groundPatch(frame))});
+      const prepared=await prepareHeadToFeetFrames(created);created.splice(0,created.length,...prepared.frames);
+      state.targetHeightRatio=prepared.targetHeight/state.canvasHeight;state.rulerBottomRatio=clamp(state.rulerBottomRatio,state.targetHeightRatio+.01,.99);
       state.frames.push(...created);state.selectedId=created[0].id;state.selectedIds=[created[0].id];state.selectionAnchorId=created[0].id;state.referenceId ||= created[0].id;
       $("#bgColor").value=colorHex(key);images.clear();syncInputs();renderAll();fitZoom();status("Auto import complete");
       const filteredNote=objects.filteredParts?` · ${objects.filteredParts} loose fragments filtered`:"";
-      toast(`Auto Import: ${created.length} complete objects · background removed${filteredNote} · arranged ${grid.cols} × ${grid.rows}`,"success");
+      toast(`Auto Import: ${created.length} complete objects · ${prepared.method} measured head to feet · background removed${filteredNote} · arranged ${grid.cols} × ${grid.rows}`,"success");
     }catch(error){status("Ready");toast("Automatic import could not read this sheet. Try Manual Grid.","error")}
   }
   function drawRect(frame) {
@@ -588,7 +593,7 @@
     const result=await prepareHeadToFeetFrames();
     state.frames=result.frames;state.targetHeightRatio=result.targetHeight/state.canvasHeight;
     state.rulerBottomRatio=clamp(state.groundRatio,state.targetHeightRatio+.01,.99);
-    syncInputs();renderAll();status("Frames matched head to feet");toast(`Matched ${state.frames.length} frames from head to feet`,"success");
+    syncInputs();renderAll();status("Frames matched head to feet");toast(`Matched ${state.frames.length} frames using ${result.method}`,"success");
   }
   function captureGuides() {
     const f=selected();if(!f)return;commit();const b=renderedBounds(f);
