@@ -170,6 +170,65 @@ async function alphaBounds(source: string | HTMLImageElement): Promise<Bounds & 
   return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
 }
 
+function detectBodyBounds(canvas: HTMLCanvasElement): Bounds {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+  const { width, height } = canvas;
+  const labels = new Int32Array(width * height);
+  const queue = new Int32Array(width * height);
+  const parts: Array<Bounds & { area: number }> = [];
+  labels.fill(-1);
+  const bodyPixel = (pixel: number) => {
+    const index = pixel * 4;
+    const r = pixels[index];
+    const g = pixels[index + 1];
+    const b = pixels[index + 2];
+    return pixels[index + 3] >= 20 && !(r > 125 && r > g * 1.3 && r > b * 1.16);
+  };
+  for (let start = 0; start < width * height; start += 1) {
+    if (labels[start] !== -1 || !bodyPixel(start)) continue;
+    const label = parts.length;
+    let head = 0;
+    let tail = 0;
+    let area = 0;
+    let minX = width;
+    let minY = height;
+    let maxX = 0;
+    let maxY = 0;
+    queue[tail++] = start;
+    labels[start] = label;
+    while (head < tail) {
+      const pixel = queue[head++];
+      const x = pixel % width;
+      const y = Math.floor(pixel / width);
+      area += 1;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+      const neighbors = [pixel - 1, pixel + 1, pixel - width, pixel + width];
+      for (const neighbor of neighbors) {
+        const nx = neighbor % width;
+        if (neighbor < 0 || neighbor >= width * height) continue;
+        if ((neighbor === pixel - 1 || neighbor === pixel + 1) && Math.abs(nx - x) !== 1) continue;
+        if (labels[neighbor] === -1 && bodyPixel(neighbor)) {
+          labels[neighbor] = label;
+          queue[tail++] = neighbor;
+        }
+      }
+    }
+    parts.push({ x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1, area });
+  }
+  if (!parts.length) return { x: 0, y: 0, w: width, h: height };
+  const body = parts.reduce((largest, part) => (part.area > largest.area ? part : largest));
+  const padding = Math.max(2, Math.round(Math.max(body.w, body.h) * 0.035));
+  const x = Math.max(0, body.x - padding);
+  const y = Math.max(0, body.y - padding);
+  const right = Math.min(width, body.x + body.w + padding);
+  const bottom = Math.min(height, body.y + body.h + padding);
+  return { x, y, w: right - x, h: bottom - y };
+}
+
 async function makeFrame(src: string, name: string, duration: number): Promise<Frame> {
   const image = await loadImage(src);
   const bounds = await alphaBounds(image);
@@ -233,6 +292,7 @@ export default function Sprited() {
   const [exportOpen, setExportOpen] = useState(false);
   const [exportColumns, setExportColumns] = useState(4);
   const [exportPrefix, setExportPrefix] = useState("animation");
+  const [uniformHeadFeet, setUniformHeadFeet] = useState(true);
   const [exportDirectoryName, setExportDirectoryName] = useState("Not selected — exports use Downloads");
   const [backgroundColor, setBackgroundColor] = useState("#00ff00");
   const [tolerance, setTolerance] = useState(52);
@@ -766,17 +826,46 @@ export default function Sprited() {
     return { ...centered, ...groundFrame(centered, refBox.y + refBox.h) };
   }
 
-  function normalizeAll() {
-    if (!reference) return showToast("Choose a reference frame first", "error");
-    pushHistory();
-    const centeredRef = { ...reference, ...centerFrame(reference) };
-    const alignedRef = { ...centeredRef, ...groundFrame(centeredRef) };
-    setFrames((items) =>
-      items.map((frame) =>
-        frame.id === reference.id ? alignedRef : matchFrame(frame, alignedRef),
+  async function prepareHeadToFeetFrames(sourceFrames = frames) {
+    const measured: Frame[] = [];
+    for (const frame of sourceFrames) {
+      const image = await loadImage(frame.src);
+      const canvas = document.createElement("canvas");
+      canvas.width = image.naturalWidth;
+      canvas.height = image.naturalHeight;
+      canvas.getContext("2d")!.drawImage(image, 0, 0);
+      measured.push({
+        ...frame,
+        charBounds: detectBodyBounds(canvas),
+        alphaBounds: { ...frame.alphaBounds },
+      });
+    }
+    if (!measured.length) return [];
+    const requestedHeight = canvasHeight * 0.72;
+    const safeHeight = Math.min(
+      ...measured.map((frame) =>
+        Math.min(
+          (canvasWidth * 0.9 * frame.charBounds.h) / Math.max(1, frame.alphaBounds.w),
+          (canvasHeight * 0.9 * frame.charBounds.h) / Math.max(1, frame.alphaBounds.h),
+        ),
       ),
     );
-    showToast(`Normalized ${frames.length} frames`, "success");
+    const targetHeight = clamp(Math.min(requestedHeight, safeHeight), canvasHeight * 0.15, canvasHeight * 0.95);
+    return measured.map((frame) => {
+      const scaled = { ...frame, scale: clamp(targetHeight / Math.max(1, frame.charBounds.h), 0.05, 10) };
+      const centered = { ...scaled, ...centerFrame(scaled) };
+      return { ...centered, ...groundFrame(centered) };
+    });
+  }
+
+  async function normalizeAll() {
+    if (!frames.length) return;
+    pushHistory();
+    setStatus("Measuring every frame from head to feet…");
+    const normalized = await prepareHeadToFeetFrames();
+    setFrames(normalized);
+    setStatus("Frames matched head to feet");
+    showToast(`Matched ${normalized.length} frames from head to feet`, "success");
   }
 
   async function detectBounds() {
@@ -972,6 +1061,7 @@ export default function Sprited() {
 
   async function exportSheet() {
     if (!frames.length) return;
+    const framesToExport = uniformHeadFeet ? await prepareHeadToFeetFrames() : frames;
     const columns = clamp(exportColumns || 1, 1, frames.length);
     const rows = Math.ceil(frames.length / columns);
     const canvas = document.createElement("canvas");
@@ -979,8 +1069,8 @@ export default function Sprited() {
     canvas.height = canvasHeight * rows;
     const ctx = canvas.getContext("2d")!;
     setStatus("Rendering sprite sheet…");
-    for (let index = 0; index < frames.length; index += 1) {
-      const cell = await frameCanvas(frames[index]);
+    for (let index = 0; index < framesToExport.length; index += 1) {
+      const cell = await frameCanvas(framesToExport[index]);
       ctx.drawImage(
         cell,
         (index % columns) * canvasWidth,
@@ -1008,12 +1098,13 @@ export default function Sprited() {
 
   async function exportFrames() {
     if (!frames.length) return;
+    const framesToExport = uniformHeadFeet ? await prepareHeadToFeetFrames() : frames;
     const pickerSupported = Boolean((window as Window & { showDirectoryPicker?: unknown }).showDirectoryPicker);
     let directory = await writableExportDirectory();
     if (!directory && pickerSupported) directory = await chooseExportDirectory();
     if (pickerSupported && !directory) return;
-    for (let index = 0; index < frames.length; index += 1) {
-      const blob = await canvasToBlob(await frameCanvas(frames[index]));
+    for (let index = 0; index < framesToExport.length; index += 1) {
+      const blob = await canvasToBlob(await frameCanvas(framesToExport[index]));
       const filename = `${safePrefix()}_${String(index + 1).padStart(3, "0")}.png`;
       if (directory) {
         await writeDirectoryFile(directory, filename, blob);
@@ -1029,7 +1120,7 @@ export default function Sprited() {
       await writeDirectoryFile(directory, `${safePrefix()}.json`, json);
     } else downloadBlob(json, `${safePrefix()}.json`);
     setExportOpen(false);
-    showToast(`${frames.length} frames exported`, "success");
+    showToast(`${framesToExport.length} frames exported`, "success");
   }
 
   function saveProject() {
@@ -1210,7 +1301,7 @@ export default function Sprited() {
         <div className="brand">
           <div className="brand-mark"><span /><span /><span /><span /></div>
           <div className="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div>
-          <span className="version-badge">VER.0.6.6</span>
+          <span className="version-badge">VER.0.6.7</span>
         </div>
         <div className="project-title">
           <input value={projectName} onChange={(event) => { setProjectName(event.target.value); setDirty(true); }} aria-label="Project name" />
@@ -1384,7 +1475,8 @@ export default function Sprited() {
               <NumberField label="Height" value={canvasHeight} onCommit={(value) => { pushHistory(); setCanvasHeight(clamp(value, 16, 4096)); }} />
             </div>
             <label className="range-field"><span>Ground line <output>{Math.round(groundRatio * 100)}%</output></span><input type="range" min="50" max="98" value={groundRatio * 100} onChange={(event) => { setGroundRatio(Number(event.target.value) / 100); setDirty(true); }} /></label>
-            <button className="wide-action accent" onClick={normalizeAll}>Normalize all to reference</button>
+            <button className="wide-action accent" onClick={() => void normalizeAll()}>Auto-match head + feet</button>
+            <p className="helper">Detects the main character in every frame, ignores surrounding effects, and matches the head-to-feet height and ground line.</p>
           </InspectorSection>
           <InspectorSection title="Background Removal">
             <div className="color-row">
@@ -1433,6 +1525,7 @@ export default function Sprited() {
             <div className="modal-header"><div><span className="eyebrow">EXPORT</span><h2>Export animation</h2><p>Create a Godot-ready sheet or individual PNG frames.</p></div><button onClick={() => setExportOpen(false)}>×</button></div>
             <div className="export-preview"><b>▦</b><div><strong>{frames.length} frames · {Math.min(exportColumns, Math.max(1, frames.length))} × {sheetRows} grid</strong><small>{canvasWidth * Math.min(exportColumns, Math.max(1, frames.length))} × {canvasHeight * sheetRows} px · transparent PNG</small></div></div>
             <div className="export-fields field-grid"><NumberField label="Sheet columns" value={exportColumns} onCommit={(value) => setExportColumns(Math.max(1, value))} /><label>File prefix<input value={exportPrefix} onChange={(event) => setExportPrefix(event.target.value)} /></label></div>
+            <label className="export-option"><input type="checkbox" checked={uniformHeadFeet} onChange={(event) => setUniformHeadFeet(event.target.checked)} /><span><strong>Match every frame head to feet</strong><small>Recommended — keeps character size and ground position uniform while ignoring surrounding effects.</small></span></label>
             <div className="export-folder"><div><strong>Default export folder</strong><small>{exportDirectoryName}</small></div><button onClick={() => void chooseExportDirectory()}>Choose folder</button></div>
             <div className="export-actions"><button className="primary" disabled={!frames.length} onClick={() => void exportSheet()}>Export Sprite Sheet</button><button disabled={!frames.length} onClick={() => void exportFrames()}>Export Separate Frames</button></div>
           </div>

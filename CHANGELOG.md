@@ -1,5 +1,11 @@
 # SPRITED version history
 
+## 0.6.7
+
+- Added automatic head-to-feet measurement for every frame.
+- Surrounding effects are ignored when calculating the character's visual size.
+- Export now matches character height and ground position by default for uniform animation frames.
+
 ## 0.6.6
 
 - Added middle-mouse drag to pan around the editor without changing sprite position.

@@ -333,6 +333,14 @@ input[type="color"] { width: 38px; height: 28px; margin-top: 4px; padding: 2px; 
 .export-preview strong, .export-preview small { display: block; }
 .export-preview small { margin-top: 4px; color: var(--muted); font-size: 9px; }
 .export-fields, .export-actions { margin-left: 20px; margin-right: 20px; }
+.export-option {
+  margin: 13px 20px 0; padding: 10px 12px; display: flex; align-items: flex-start; gap: 9px;
+  border: 1px solid #6b4a35; border-radius: 8px; background: rgba(183,112,67,.1); cursor: pointer;
+}
+.export-option input { width: 14px; height: 14px; margin-top: 1px; accent-color: var(--accent); }
+.export-option span, .export-option strong, .export-option small { display: block; }
+.export-option strong { color: #f0d7c3; font-size: 10px; }
+.export-option small { margin-top: 3px; color: var(--muted); font-size: 8px; line-height: 1.4; }
 .export-folder {
   margin: 13px 20px 0; padding: 10px 12px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
   border: 1px solid var(--line); border-radius: 8px; background: #1c1310;

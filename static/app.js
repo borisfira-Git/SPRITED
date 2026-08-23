@@ -332,6 +332,27 @@
     const minX=Math.max(0,body.minX-pad),minY=Math.max(0,body.minY-pad),maxX=Math.min(w-1,body.maxX+pad),maxY=Math.min(h-1,body.maxY+pad);
     return{x:minX,y:minY,w:maxX-minX+1,h:maxY-minY+1};
   }
+  async function prepareHeadToFeetFrames(sourceFrames=state.frames) {
+    const measured=[];
+    for(const frame of sourceFrames){
+      const image=await loadImage(frame.src),c=document.createElement("canvas");
+      c.width=image.naturalWidth;c.height=image.naturalHeight;c.getContext("2d").drawImage(image,0,0);
+      measured.push({...frame,charBounds:detectBodyBounds(c),alphaBounds:{...frame.alphaBounds}});
+    }
+    if(!measured.length)return{frames:[],targetHeight:0};
+    const requestedHeight=state.canvasHeight*state.targetHeightRatio;
+    const safeHeight=Math.min(...measured.map((frame)=>Math.min(
+      state.canvasWidth*.9*frame.charBounds.h/Math.max(1,frame.alphaBounds.w),
+      state.canvasHeight*.9*frame.charBounds.h/Math.max(1,frame.alphaBounds.h)
+    )));
+    const targetHeight=clamp(Math.min(requestedHeight,safeHeight),state.canvasHeight*.15,state.canvasHeight*.95);
+    const normalized=measured.map((frame)=>{
+      const scaled={...frame,scale:clamp(targetHeight/Math.max(1,frame.charBounds.h),.05,10)};
+      const centered={...scaled,...centerPatch(scaled)};
+      return{...centered,...groundPatch(centered)};
+    });
+    return{frames:normalized,targetHeight};
+  }
   async function autoImport(file) {
     if(!file)return;
     try{
@@ -561,9 +582,13 @@
     return moved;
   }
   function match(f,ref){const scaled={...f,scale:ref.charBounds.h*ref.scale/Math.max(1,f.charBounds.h)};const centered={...scaled,...centerPatch(scaled)};const rb=renderedBounds(ref);return{...centered,...groundPatch(centered,rb.y+rb.h)}}
-  function normalize() {
-    let ref=reference();if(!ref)return toast("Choose a reference frame first","error");commit();ref={...ref,...centerPatch(ref)};ref={...ref,...groundPatch(ref)};
-    state.frames=state.frames.map(f=>f.id===ref.id?ref:match(f,ref));renderAll();toast(`Normalized ${state.frames.length} frames`,"success");
+  async function normalize() {
+    if(!state.frames.length)return;
+    commit();status("Measuring every frame from head to feet…");
+    const result=await prepareHeadToFeetFrames();
+    state.frames=result.frames;state.targetHeightRatio=result.targetHeight/state.canvasHeight;
+    state.rulerBottomRatio=clamp(state.groundRatio,state.targetHeightRatio+.01,.99);
+    syncInputs();renderAll();status("Frames matched head to feet");toast(`Matched ${state.frames.length} frames from head to feet`,"success");
   }
   function captureGuides() {
     const f=selected();if(!f)return;commit();const b=renderedBounds(f);
@@ -639,10 +664,11 @@
   function metadata(cols,size){return{animation:prefix(),fps:state.fps,loop:state.loop,frame_width:size.w,frame_height:size.h,frames:state.frames.length,horizontal_frames:Math.min(cols,state.frames.length),vertical_frames:Math.ceil(state.frames.length/cols),durations_ms:state.frames.map(f=>f.duration),reference_frame:Math.max(0,state.frames.findIndex(f=>f.id===state.referenceId))}}
   async function exportSheet(){
     if(!state.frames.length)return;
-    const cols=clamp(Number($("#exportColumns").value)||1,1,state.frames.length),rows=Math.ceil(state.frames.length/cols),size=exportFrameSize(),c=document.createElement("canvas");
+    const exportFrames=$("#uniformHeadFeet").checked?(await prepareHeadToFeetFrames()).frames:state.frames;
+    const cols=clamp(Number($("#exportColumns").value)||1,1,exportFrames.length),rows=Math.ceil(exportFrames.length/cols),size=exportFrameSize(),c=document.createElement("canvas");
     c.width=size.w*cols;c.height=size.h*rows;
     const x=c.getContext("2d");x.imageSmoothingEnabled=true;x.imageSmoothingQuality="high";status("Rendering high-quality sprite sheet…");
-    for(let i=0;i<state.frames.length;i++)x.drawImage(await renderedFrame(state.frames[i],size),i%cols*size.w,Math.floor(i/cols)*size.h);
+    for(let i=0;i<exportFrames.length;i++)x.drawImage(await renderedFrame(exportFrames[i],size),i%cols*size.w,Math.floor(i/cols)*size.h);
     const sheetBlob=await canvasBlob(c),sheetName=`${prefix()}_${size.w}px_${cols}x${rows}.png`,jsonBlob=new Blob([JSON.stringify(metadata(cols,size),null,2)],{type:"application/json"}),jsonName=`${prefix()}.json`,dir=await writableDefaultExportDirectory();
     if(dir){await writeDirectoryFile(dir,sheetName,sheetBlob);await writeDirectoryFile(dir,jsonName,jsonBlob)}else{download(sheetBlob,sheetName);download(jsonBlob,jsonName)}
     $("#exportModal").classList.add("hidden");status("Sprite sheet exported");toast(`Exported ${c.width} × ${c.height} sprite sheet`,"success");
@@ -650,16 +676,17 @@
   async function exportFrames(){
     if(!state.frames.length)return;
     const size=exportFrameSize();
+    const framesToExport=$("#uniformHeadFeet").checked?(await prepareHeadToFeetFrames()).frames:state.frames;
     let dir=await writableDefaultExportDirectory();
     if(!dir&&window.showDirectoryPicker)dir=await chooseDefaultExportFolder();
     if(window.showDirectoryPicker&&!dir)return;
-    for(let i=0;i<state.frames.length;i++){
-      const blob=await canvasBlob(await renderedFrame(state.frames[i],size)),name=`${prefix()}_${size.w}px_${String(i+1).padStart(3,"0")}.png`;
+    for(let i=0;i<framesToExport.length;i++){
+      const blob=await canvasBlob(await renderedFrame(framesToExport[i],size)),name=`${prefix()}_${size.w}px_${String(i+1).padStart(3,"0")}.png`;
       if(dir)await writeDirectoryFile(dir,name,blob);else{download(blob,name);await new Promise(r=>setTimeout(r,80))}
     }
     const jsonBlob=new Blob([JSON.stringify(metadata($("#exportColumns").value,size),null,2)],{type:"application/json"}),jsonName=`${prefix()}.json`;
     if(dir)await writeDirectoryFile(dir,jsonName,jsonBlob);else download(jsonBlob,jsonName);
-    toast(`${state.frames.length} frames exported at ${size.w} × ${size.h}`,"success");$("#exportModal").classList.add("hidden");
+    toast(`${framesToExport.length} frames exported at ${size.w} × ${size.h}`,"success");$("#exportModal").classList.add("hidden");
   }
   function saveProject(){state.projectName=$("#projectName").value.trim()||"Untitled Animation";download(new Blob([JSON.stringify(snapshot())],{type:"application/json"}),`${state.projectName.replace(/[^\w-]+/g,"_").toLowerCase()}.spriteproject`);$("#saveState").textContent="Saved locally";toast("Project saved","success")}
   async function openProject(file){try{const data=JSON.parse(await file.text());if(!Array.isArray(data.frames))throw Error();state.history=[];state.future=[];restore(data);$("#saveState").textContent="Saved locally";toast("Project opened","success")}catch{toast("Could not open this project","error")}}
