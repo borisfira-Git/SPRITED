@@ -13,7 +13,7 @@
 <body>
 <div class="app-shell">
   <header class="topbar">
-    <div class="brand"><div class="brand-mark"><span></span><span></span><span></span><span></span></div><div class="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div><span class="version-badge">VER.0.6.8</span></div>
+    <div class="brand"><div class="brand-mark"><span></span><span></span><span></span><span></span></div><div class="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div><span class="version-badge">VER.0.6.9</span></div>
     <div class="project-title"><input id="projectName" value="Untitled Animation" aria-label="Project name"><span id="saveState">Local project</span></div>
     <nav class="toolbar">
       <button id="newBtn">＋ New</button><button id="openBtn">⌁ Open</button><button id="saveBtn">↓ Save</button><i></i>
@@ -36,7 +36,7 @@
     <section class="editor-area">
       <div class="editor-toolbar">
         <div class="segmented"><button class="active" data-tool="move">Move</button><button data-tool="bounds">Character Box</button><button data-tool="guides">Anchor</button></div>
-        <div class="view-toggles"><button id="gridBtn" class="active">Grid</button><button id="groundBtn" class="active">Ground</button><button id="guidesBtn" class="active">Ruler</button><button id="boundsBtn" class="active">Bounds</button></div>
+        <div class="view-toggles"><button id="gridBtn" class="active">Grid</button><button id="groundBtn" class="active">Ground</button><button id="guidesBtn" class="active">Ruler</button><button id="boundsBtn" class="active">Bounds</button><button id="bodyDebugBtn">Body Debug</button></div>
         <div class="zoom-tools"><button id="zoomOutBtn">−</button><button id="fitBtn">Fit</button><button id="zoomInBtn">＋</button></div>
       </div>
       <div id="canvasStage" class="canvas-stage" title="Middle mouse drag: pan view · Ctrl + wheel: zoom · S + wheel: scale sprite · Arrows: move">
@@ -63,6 +63,7 @@
         </div></section>
         <section class="property-section"><button class="section-title"><span>Character Bounds</span><span>⌃</span></button><div class="section-body">
           <p class="helper">The orange box measures the character. Keep fire and aura outside it.</p>
+          <p id="bodyReadout" class="helper">Body anchor has not been measured.</p>
           <div class="field-grid four"><label>X<input id="boundX" type="number"></label><label>Y<input id="boundY" type="number"></label><label>W<input id="boundW" type="number"></label><label>H<input id="boundH" type="number"></label></div>
           <div class="button-grid"><button id="detectBtn">Detect from alpha</button><button id="referenceBtn">Set as reference</button></div>
           <button id="matchBtn" class="wide-action">Match size + ground to reference</button>
@@ -75,8 +76,8 @@
       <section class="property-section"><button class="section-title"><span>Canvas</span><span>⌃</span></button><div class="section-body">
         <div class="field-grid"><label>Width<input id="canvasWidth" type="number" value="512"></label><label>Height<input id="canvasHeight" type="number" value="512"></label></div>
         <label class="range-field"><span>Ground line <output id="groundOutput">88%</output></span><input id="groundLine" type="range" min="50" max="98" value="88"></label>
-        <button id="normalizeBtn" class="wide-action accent">Auto-match head + feet</button>
-        <p class="helper">Uses one shared Scale for every frame, builds a common head-to-feet box, and aligns all feet to the same ground line.</p>
+        <button id="alignBodyBtn" class="wide-action accent">Align All Frames to Body</button>
+        <p class="helper">Aligns the pelvis/body axis and feet while ignoring narrow side extensions. One shared Scale is used for the whole animation.</p>
       </div></section>
       <section class="property-section"><button class="section-title"><span>Anchor & Size Ruler</span><span>⌃</span></button><div class="section-body">
         <p class="helper">With the Anchor tool, drag the ruler body up/down or drag its top and bottom handles. The measured pixel height is your Scale reference.</p>
@@ -123,7 +124,7 @@
     <label>Frame quality<select id="exportResolution"><option value="current">Current editor size</option><option value="256">256 × 256</option><option value="512">512 × 512</option><option value="1024" selected>1024 × 1024</option><option value="2048">2048 × 2048</option></select></label>
     <label class="full-field">File prefix<input id="exportPrefix" value="animation"></label>
   </div>
-  <label class="export-option"><input id="uniformHeadFeet" type="checkbox" checked><span><strong>Lock one Scale + align feet</strong><small>Recommended — all frames use one shared Scale, a common frame box and the same bottom-center pivot.</small></span></label>
+  <label class="export-option"><input id="alignByBody" type="checkbox" checked><span><strong>Align by Body</strong><small>Uses the alignment stored in the editor and preserves every manual X/Y correction during export.</small></span></label>
   <div class="export-folder"><div><strong>Default export folder</strong><small id="exportFolderName">Not selected — exports use Downloads</small></div><button id="chooseExportFolderBtn">Choose folder</button></div>
   <div class="export-actions"><button id="exportSheetBtn" class="primary">Export Sprite Sheet</button><button id="exportFramesBtn">Export Separate Frames</button></div>
 </div></div>

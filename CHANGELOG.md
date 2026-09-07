@@ -1,5 +1,13 @@
 # SPRITED version history
 
+## 0.6.9
+
+- Added body-based alignment using a pelvis/lower-body anchor instead of the full alpha bounding box.
+- Added `Align by Body`, `Align All Frames to Body`, and an editor-only Body Debug overlay.
+- Added a shared animation Scale with reference-frame alignment and confidence-based fallbacks.
+- Manual X/Y corrections are now stored separately and preserved during Sprite Sheet and separate-frame export.
+- Export reuses editor alignment and does not realign frames that are already body-aligned.
+
 ## 0.6.8
 
 - Tested automatic sizing with the supplied `IDLEPIKA.png` eight-frame sheet.
