@@ -8,7 +8,7 @@
   const state = {
     projectName: "Untitled Animation", frames: [], selectedId: null, selectedIds: [], selectionAnchorId: null, referenceId: null,
     canvasWidth: 512, canvasHeight: 512, groundRatio: .88, anchorRatio: .5, targetHeightRatio: .72, rulerBottomRatio: .88, fps: 12, loop: true,
-    playing: false, zoom: 1, tool: "move", grid: true, ground: true, guides: true, bounds: true, bodyDebug: false,
+    playing: false, zoom: 1, tool: "move", grid: true, ground: true, guides: true, bounds: true, bodyDebug: false, alignmentMode: "body",
     sliceImage: null, sliceName: "", history: [], future: []
   };
   const canvas = $("#editorCanvas");
@@ -37,7 +37,7 @@
       selectedId: state.selectedId, selectedIds: [...state.selectedIds], selectionAnchorId: state.selectionAnchorId,
       referenceId: state.referenceId, canvasWidth: state.canvasWidth,
       canvasHeight: state.canvasHeight, groundRatio: state.groundRatio, anchorRatio: state.anchorRatio,
-      targetHeightRatio: state.targetHeightRatio, rulerBottomRatio: state.rulerBottomRatio, fps: state.fps, loop: state.loop
+      targetHeightRatio: state.targetHeightRatio, rulerBottomRatio: state.rulerBottomRatio, alignmentMode: state.alignmentMode, fps: state.fps, loop: state.loop
     };
   }
   function restore(data) {
@@ -54,6 +54,7 @@
       anchorRatio: data.anchorRatio ?? .5,
       targetHeightRatio: data.targetHeightRatio ?? .72,
       rulerBottomRatio: clamp(data.rulerBottomRatio ?? data.groundRatio ?? .88,(data.targetHeightRatio ?? .72)+.01,.99),
+      alignmentMode: data.alignmentMode === "rightFoot" ? "rightFoot" : "body",
       playing: false
     });
     images.clear(); syncInputs(); renderAll();
@@ -177,8 +178,8 @@
       id: uid(), name, src, sourceWidth: image.naturalWidth, sourceHeight: image.naturalHeight,
       x: 0, y: 0, scale: 1, rotation: 0, duration: Math.round(1000 / state.fps),
       charBounds: { ...bounds }, alphaBounds: { ...bounds }, bodyBounds: undefined,
-      bodyAnchorX: undefined, bodyGroundY: undefined, bodyConfidence: 0, bodySource: "unmeasured",
-      autoX: 0, autoY: 0, manualOffsetX: 0, manualOffsetY: 0, bodyAligned: false, manualBodyAnchor: false
+      bodyAnchorX: undefined, rightFootX: undefined, bodyGroundY: undefined, bodyConfidence: 0, bodySource: "unmeasured",
+      autoX: 0, autoY: 0, manualOffsetX: 0, manualOffsetY: 0, bodyAligned: false, alignmentMode: undefined, manualBodyAnchor: false
     };
   }
   function colorHex({ r, g, b }) {
@@ -327,7 +328,7 @@
   }
   function fullAlphaBody(frame,source="full alpha"){
     const b=frame.alphaBounds;
-    return{bounds:{...b},anchorX:b.x+b.w/2,groundY:b.y+b.h,confidence:.1,source};
+    return{bounds:{...b},anchorX:b.x+b.w/2,rightFootX:b.x+b.w*.72,groundY:b.y+b.h,confidence:.1,source};
   }
   function detectBodyGeometry(c){
     const x=c.getContext("2d",{willReadFrequently:true}),d=x.getImageData(0,0,c.width,c.height).data,w=c.width,h=c.height;
@@ -372,22 +373,27 @@
       let continuous=0;for(let check=py;check>=Math.max(lowerStart,py-5);check--)if(rows[check].filter((px)=>Math.abs(px-anchorX)<=halfCorridor).length>=threshold)continuous++;
       if(continuous>=3){ground=py;break}
     }
+    const footTop=Math.max(lowerStart,Math.round(ground-bodyH*.2)),footXs=[];
+    for(let py=footTop;py<=ground;py++)for(const px of rows[py]){
+      if(px>=anchorX-coreWidth*.08&&px<=anchorX+coreWidth*.95)footXs.push(px);
+    }
+    const rightFootX=footXs.length>=4?percentile(footXs,.92):anchorX+coreWidth*.32;
     const top=Math.round(body.minY+bodyH*.12),left=clamp(Math.round(anchorX-coreWidth*.64),0,w-1),right=clamp(Math.round(anchorX+coreWidth*.64),left+1,w);
     const mids=anchorRows.map((row)=>row.mid),mad=percentile(mids.map((value)=>Math.abs(value-anchorX)),.5),componentShare=body.area/Math.max(1,totalAlpha);
     const confidence=clamp(.38+Math.min(.3,componentShare*.35)+Math.min(.2,anchorRows.length/50)-Math.min(.25,mad/Math.max(2,coreWidth)),0,1);
-    return{bounds:{x:left,y:top,w:right-left,h:Math.max(1,ground+1-top)},anchorX,groundY:ground+1,confidence,source:"body core"};
+    return{bounds:{x:left,y:top,w:right-left,h:Math.max(1,ground+1-top)},anchorX,rightFootX,groundY:ground+1,confidence,source:"body core"};
   }
   function manualBodyGeometry(frame){
     if(!frame.manualBodyAnchor)return null;
     const b=frame.charBounds;
-    return{bounds:{...b},anchorX:b.x+b.w/2,groundY:b.y+b.h,confidence:1,source:"manual anchor"};
+    return{bounds:{...b},anchorX:b.x+b.w/2,rightFootX:Number.isFinite(frame.rightFootX)?frame.rightFootX:b.x+b.w*.72,groundY:b.y+b.h,confidence:1,source:"manual anchor"};
   }
   function geometryFromReference(frame,refFrame,refGeometry){
     const b=frame.alphaBounds,rb=refFrame.alphaBounds;
-    const nx=(refGeometry.anchorX-rb.x)/Math.max(1,rb.w),ng=(refGeometry.groundY-rb.y)/Math.max(1,rb.h);
+    const nx=(refGeometry.anchorX-rb.x)/Math.max(1,rb.w),nrf=(refGeometry.rightFootX-rb.x)/Math.max(1,rb.w),ng=(refGeometry.groundY-rb.y)/Math.max(1,rb.h);
     const nw=refGeometry.bounds.w/Math.max(1,rb.w),nt=(refGeometry.bounds.y-rb.y)/Math.max(1,rb.h),nh=refGeometry.bounds.h/Math.max(1,rb.h);
     const bounds={x:clamp(b.x+b.w*(nx-nw/2),0,frame.sourceWidth-1),y:clamp(b.y+b.h*nt,0,frame.sourceHeight-1),w:Math.max(1,Math.min(frame.sourceWidth,b.w*nw)),h:Math.max(1,Math.min(frame.sourceHeight,b.h*nh))};
-    return{bounds,anchorX:b.x+b.w*nx,groundY:b.y+b.h*ng,confidence:.45,source:"reference frame"};
+    return{bounds,anchorX:b.x+b.w*nx,rightFootX:b.x+b.w*nrf,groundY:b.y+b.h*ng,confidence:.45,source:"reference frame"};
   }
   function resolveBodyGeometry(frame,detected,refFrame,refGeometry,isReference){
     const manual=manualBodyGeometry(frame);if(manual)return manual;
@@ -397,14 +403,14 @@
     return fullAlphaBody(frame);
   }
   function detectBodyBounds(c){return detectBodyGeometry(c)?.bounds||{x:0,y:0,w:c.width,h:c.height}}
-  async function prepareHeadToFeetFrames(sourceFrames=state.frames,{targetFromGuides=false}={}){
+  async function prepareHeadToFeetFrames(sourceFrames=state.frames,{targetFromGuides=false,mode=state.alignmentMode}={}){
     const measured=[];
     for(const frame of sourceFrames){
       const image=await loadImage(frame.src),c=document.createElement("canvas");
       c.width=image.naturalWidth;c.height=image.naturalHeight;c.getContext("2d").drawImage(image,0,0);
       measured.push({frame:{...frame,alphaBounds:{...frame.alphaBounds},charBounds:{...frame.charBounds}},detected:detectBodyGeometry(c)});
     }
-    if(!measured.length)return{frames:[],targetHeight:0,sharedScale:1,method:"body"};
+    if(!measured.length)return{frames:[],targetHeight:0,sharedScale:1,method:mode};
     const refEntry=measured.find(({frame})=>frame.id===state.referenceId)||measured[0];
     const rawRef=manualBodyGeometry(refEntry.frame)||(refEntry.detected?{...refEntry.detected,source:refEntry.detected.confidence>=.52?"body core":"trimmed alpha core"}:fullAlphaBody(refEntry.frame));
     const resolved=measured.map((entry)=>({frame:entry.frame,geometry:resolveBodyGeometry(entry.frame,entry.detected,refEntry.frame,rawRef,entry===refEntry)}));
@@ -413,17 +419,23 @@
     const safeScale=Math.min(...resolved.map(({frame})=>Math.min(state.canvasWidth*.9/Math.max(1,frame.alphaBounds.w),state.canvasHeight*.9/Math.max(1,frame.alphaBounds.h))));
     const sharedScale=clamp(Math.min(requestedScale,safeScale),.05,10),targetHeight=ref.geometry.bounds.h*sharedScale;
     let targetAxis=state.canvasWidth*state.anchorRatio,targetGround=state.canvasHeight*state.groundRatio;
-    if(!targetFromGuides&&ref.frame.bodyAligned&&Number.isFinite(ref.frame.autoX)&&Number.isFinite(ref.frame.autoY)){
-      targetAxis=state.canvasWidth/2-ref.frame.sourceWidth*sharedScale/2+ref.frame.autoX+ref.geometry.anchorX*sharedScale;
+    const referenceAnchorX=mode==="rightFoot"?ref.geometry.rightFootX:ref.geometry.anchorX;
+    if(!targetFromGuides&&ref.frame.bodyAligned&&ref.frame.alignmentMode===mode&&Number.isFinite(ref.frame.autoX)&&Number.isFinite(ref.frame.autoY)){
+      targetAxis=state.canvasWidth/2-ref.frame.sourceWidth*sharedScale/2+ref.frame.autoX+referenceAnchorX*sharedScale;
       targetGround=state.canvasHeight/2-ref.frame.sourceHeight*sharedScale/2+ref.frame.autoY+ref.geometry.groundY*sharedScale;
+    }else if(!targetFromGuides&&mode==="rightFoot"){
+      const baseX=ref.frame.bodyAligned&&Number.isFinite(ref.frame.autoX)?ref.frame.autoX:ref.frame.x;
+      const baseY=ref.frame.bodyAligned&&Number.isFinite(ref.frame.autoY)?ref.frame.autoY:ref.frame.y;
+      targetAxis=state.canvasWidth/2-ref.frame.sourceWidth*sharedScale/2+baseX+referenceAnchorX*sharedScale;
+      targetGround=state.canvasHeight/2-ref.frame.sourceHeight*sharedScale/2+baseY+ref.geometry.groundY*sharedScale;
     }
     const normalized=resolved.map(({frame,geometry})=>{
       const manualOffsetX=Number.isFinite(frame.manualOffsetX)?frame.manualOffsetX:0,manualOffsetY=Number.isFinite(frame.manualOffsetY)?frame.manualOffsetY:0;
-      const measuredFrame={...frame,scale:sharedScale,charBounds:{...geometry.bounds},bodyBounds:{...geometry.bounds},bodyAnchorX:geometry.anchorX,bodyGroundY:geometry.groundY,bodyConfidence:geometry.confidence,bodySource:geometry.source,x:0,y:0};
-      const autoX=centerPatch(measuredFrame,targetAxis).x,autoY=groundPatch({...measuredFrame,x:autoX},targetGround).y;
-      return{...measuredFrame,autoX,autoY,manualOffsetX,manualOffsetY,x:autoX+manualOffsetX,y:autoY+manualOffsetY,bodyAligned:true};
+      const measuredFrame={...frame,scale:sharedScale,charBounds:{...geometry.bounds},bodyBounds:{...geometry.bounds},bodyAnchorX:geometry.anchorX,rightFootX:geometry.rightFootX,bodyGroundY:geometry.groundY,bodyConfidence:geometry.confidence,bodySource:geometry.source,x:0,y:0};
+      const autoX=centerPatch(measuredFrame,targetAxis,mode).x,autoY=groundPatch({...measuredFrame,x:autoX},targetGround).y;
+      return{...measuredFrame,autoX,autoY,manualOffsetX,manualOffsetY,x:autoX+manualOffsetX,y:autoY+manualOffsetY,bodyAligned:true,alignmentMode:mode};
     });
-    return{frames:normalized,targetHeight,sharedScale,method:"body",referenceId:ref.frame.id};
+    return{frames:normalized,targetHeight,sharedScale,method:mode,referenceId:ref.frame.id};
   }
   async function autoImport(file) {
     if(!file)return;
@@ -452,6 +464,12 @@
   }
   function renderedBodyAnchor(frame){
     const d=drawRect(frame),anchorX=Number.isFinite(frame.bodyAnchorX)?frame.bodyAnchorX:frame.charBounds.x+frame.charBounds.w/2;
+    const groundY=Number.isFinite(frame.bodyGroundY)?frame.bodyGroundY:frame.charBounds.y+frame.charBounds.h;
+    return{x:d.x+anchorX*frame.scale,y:d.y+groundY*frame.scale};
+  }
+  function renderedAlignmentAnchor(frame,mode=state.alignmentMode){
+    const d=drawRect(frame),fallback=Number.isFinite(frame.bodyAnchorX)?frame.bodyAnchorX:frame.charBounds.x+frame.charBounds.w/2;
+    const anchorX=mode==="rightFoot"&&Number.isFinite(frame.rightFootX)?frame.rightFootX:fallback;
     const groundY=Number.isFinite(frame.bodyGroundY)?frame.bodyGroundY:frame.charBounds.y+frame.charBounds.h;
     return{x:d.x+anchorX*frame.scale,y:d.y+groundY*frame.scale};
   }
@@ -506,11 +524,12 @@
       });
     }
     if(state.bodyDebug&&frame){
-      const anchor=renderedBodyAnchor(frame),body=renderedBodyBounds(frame);
+      const anchor=renderedBodyAnchor(frame),foot=renderedAlignmentAnchor(frame,"rightFoot"),body=renderedBodyBounds(frame);
       target.setLineDash([8,5]);target.lineWidth=5;target.strokeStyle="#28140d";target.beginPath();target.moveTo(anchor.x,0);target.lineTo(anchor.x,state.canvasHeight);target.moveTo(0,anchor.y);target.lineTo(state.canvasWidth,anchor.y);target.stroke();
       target.lineWidth=2;target.strokeStyle="#63d8ff";target.beginPath();target.moveTo(anchor.x,0);target.lineTo(anchor.x,state.canvasHeight);target.moveTo(0,anchor.y);target.lineTo(state.canvasWidth,anchor.y);target.stroke();
       target.setLineDash([]);target.lineWidth=5;target.strokeStyle="#28140d";target.strokeRect(body.x,body.y,body.w,body.h);target.lineWidth=2;target.strokeStyle="#63d8ff";target.strokeRect(body.x,body.y,body.w,body.h);
       target.fillStyle="#28140d";target.fillRect(clamp(anchor.x+8,4,state.canvasWidth-126),clamp(anchor.y-24,4,state.canvasHeight-22),118,18);target.fillStyle="#bceeff";target.font="bold 10px system-ui";target.fillText("BODY ANCHOR",clamp(anchor.x+14,10,state.canvasWidth-118),clamp(anchor.y-11,17,state.canvasHeight-9));
+      target.lineWidth=7;target.strokeStyle="#28140d";target.beginPath();target.arc(foot.x,foot.y,9,0,Math.PI*2);target.stroke();target.lineWidth=3;target.strokeStyle="#ff73c7";target.beginPath();target.arc(foot.x,foot.y,9,0,Math.PI*2);target.stroke();target.beginPath();target.moveTo(foot.x-13,foot.y);target.lineTo(foot.x+13,foot.y);target.moveTo(foot.x,foot.y-13);target.lineTo(foot.x,foot.y+13);target.stroke();
     }
     target.restore();
   }
@@ -592,7 +611,7 @@
     $("#boundX").value = Math.round(f.charBounds.x); $("#boundY").value = Math.round(f.charBounds.y);
     $("#boundW").value = Math.round(f.charBounds.w); $("#boundH").value = Math.round(f.charBounds.h);
     $("#bodyReadout").textContent=Number.isFinite(f.bodyAnchorX)
-      ? `Body anchor X ${Math.round(f.bodyAnchorX)} · Ground Y ${Math.round(f.bodyGroundY)} · ${Math.round((f.bodyConfidence||0)*100)}% · ${f.bodySource||"body"}`
+      ? `Body anchor X ${Math.round(f.bodyAnchorX)} · Right foot X ${Math.round(f.rightFootX??f.bodyAnchorX)} · Ground Y ${Math.round(f.bodyGroundY)} · ${Math.round((f.bodyConfidence||0)*100)}% · ${f.bodySource||"body"}`
       : "Body anchor has not been measured.";
     $("#durationInput").value = f.duration; $("#matchBtn").disabled = !reference() || reference().id === f.id;
   }
@@ -617,6 +636,7 @@
     $("#rulerPosition").value = state.rulerBottomRatio*100; $("#rulerPositionOutput").textContent = `${Math.round(state.rulerBottomRatio*100)}%`;
     $("#guidesBtn").classList.toggle("active", state.guides);
     $("#bodyDebugBtn").classList.toggle("active", state.bodyDebug);
+    $("#alignmentMode").value=state.alignmentMode;
     $("#fpsInput").value = state.fps; $("#loopBtn").classList.toggle("active", state.loop);
   }
   async function importFrames(files) {
@@ -658,7 +678,7 @@
     }
     state.referenceId ||= created[0]?.id;$("#sliceModal").classList.add("hidden");status("Sprite sheet sliced");renderAll();fitZoom();toast(`${created.length} frames created`,"success");
   }
-  function centerPatch(f,target=state.canvasWidth*state.anchorRatio){const anchor=renderedBodyAnchor(f);return{x:f.x+target-anchor.x}}
+  function centerPatch(f,target=state.canvasWidth*state.anchorRatio,mode=state.alignmentMode){const anchor=renderedAlignmentAnchor(f,mode);return{x:f.x+target-anchor.x}}
   function groundPatch(f,target=state.canvasHeight*state.groundRatio){const anchor=renderedBodyAnchor(f);return{y:f.y+target-anchor.y}}
   function setManualPosition(frame,x=frame.x,y=frame.y){
     frame.x=x;frame.y=y;
@@ -677,13 +697,13 @@
     return moved;
   }
   function match(f,ref){const scaled={...f,scale:ref.scale},centered={...scaled,...centerPatch(scaled,renderedBodyAnchor(ref).x)};return{...centered,...groundPatch(centered,renderedBodyAnchor(ref).y)}}
-  async function normalize() {
+  async function normalize(mode=state.alignmentMode) {
     if(!state.frames.length)return;
-    commit();status("Detecting body anchors in every frame…");
-    const result=await prepareHeadToFeetFrames();
+    commit();state.alignmentMode=mode;status(mode==="rightFoot"?"Detecting the right foot in every frame…":"Detecting body anchors in every frame…");
+    const result=await prepareHeadToFeetFrames(state.frames,{mode});
     state.frames=result.frames;state.targetHeightRatio=result.targetHeight/state.canvasHeight;
     state.rulerBottomRatio=clamp(state.groundRatio,state.targetHeightRatio+.01,.99);
-    syncInputs();renderAll();status("Frames aligned by body");toast(`Aligned ${state.frames.length} frames to the reference body`,"success");
+    syncInputs();renderAll();status(mode==="rightFoot"?"Frames aligned by right foot":"Frames aligned by body");toast(mode==="rightFoot"?`Aligned ${state.frames.length} frames to the reference right foot`:`Aligned ${state.frames.length} frames to the reference body`,"success");
   }
   function captureGuides() {
     const f=selected();if(!f)return;commit();const b=renderedBodyBounds(f);
@@ -698,13 +718,13 @@
     const result=await prepareHeadToFeetFrames(state.frames,{targetFromGuides:true});state.frames=result.frames;
     renderAll();toast(`Aligned ${state.frames.length} bodies to ruler + anchor`,"success");
   }
-  async function detectBounds(){const f=selected();if(!f)return;commit();const b=await alphaBounds(f.src);f.charBounds={x:b.x,y:b.y,w:b.w,h:b.h};f.alphaBounds={...f.charBounds};Object.assign(f,{bodyAligned:false,bodyBounds:undefined,bodyAnchorX:undefined,bodyGroundY:undefined,manualBodyAnchor:false});renderAll();toast("Character box detected")}
-  async function trim(){const f=selected();if(!f)return;const b=await alphaBounds(f.src);if(b.empty)return toast("This frame is empty","error");commit();const image=await loadImage(f.src),c=document.createElement("canvas");c.width=b.w;c.height=b.h;c.getContext("2d").drawImage(image,b.x,b.y,b.w,b.h,0,0,b.w,b.h);f.src=c.toDataURL("image/png");f.sourceWidth=b.w;f.sourceHeight=b.h;f.alphaBounds={x:0,y:0,w:b.w,h:b.h};f.charBounds={x:clamp(f.charBounds.x-b.x,0,b.w-1),y:clamp(f.charBounds.y-b.y,0,b.h-1),w:Math.min(f.charBounds.w,b.w),h:Math.min(f.charBounds.h,b.h)};Object.assign(f,{bodyAligned:false,bodyBounds:undefined,bodyAnchorX:undefined,bodyGroundY:undefined});images.clear();renderAll();toast("Transparent margins trimmed","success")}
+  async function detectBounds(){const f=selected();if(!f)return;commit();const b=await alphaBounds(f.src);f.charBounds={x:b.x,y:b.y,w:b.w,h:b.h};f.alphaBounds={...f.charBounds};Object.assign(f,{bodyAligned:false,alignmentMode:undefined,bodyBounds:undefined,bodyAnchorX:undefined,rightFootX:undefined,bodyGroundY:undefined,manualBodyAnchor:false});renderAll();toast("Character box detected")}
+  async function trim(){const f=selected();if(!f)return;const b=await alphaBounds(f.src);if(b.empty)return toast("This frame is empty","error");commit();const image=await loadImage(f.src),c=document.createElement("canvas");c.width=b.w;c.height=b.h;c.getContext("2d").drawImage(image,b.x,b.y,b.w,b.h,0,0,b.w,b.h);f.src=c.toDataURL("image/png");f.sourceWidth=b.w;f.sourceHeight=b.h;f.alphaBounds={x:0,y:0,w:b.w,h:b.h};f.charBounds={x:clamp(f.charBounds.x-b.x,0,b.w-1),y:clamp(f.charBounds.y-b.y,0,b.h-1),w:Math.min(f.charBounds.w,b.w),h:Math.min(f.charBounds.h,b.h)};Object.assign(f,{bodyAligned:false,alignmentMode:undefined,bodyBounds:undefined,bodyAnchorX:undefined,rightFootX:undefined,bodyGroundY:undefined});images.clear();renderAll();toast("Transparent margins trimmed","success")}
   function hex(hex){return{r:parseInt(hex.slice(1,3),16),g:parseInt(hex.slice(3,5),16),b:parseInt(hex.slice(5,7),16)}}
   async function removeBackground(all) {
     const targets=all?state.frames:[selected()].filter(Boolean);if(!targets.length)return;commit();status(`Removing background from ${targets.length} frames…`);
     const target=hex($("#bgColor").value),tol=Number($("#tolerance").value),soft=Number($("#softness").value);
-    for(const f of targets){const image=await loadImage(f.src),c=document.createElement("canvas");c.width=image.naturalWidth;c.height=image.naturalHeight;const x=c.getContext("2d",{willReadFrequently:true});x.drawImage(image,0,0);const id=x.getImageData(0,0,c.width,c.height),d=id.data;for(let i=0;i<d.length;i+=4){const dr=d[i]-target.r,dg=d[i+1]-target.g,db=d[i+2]-target.b,dist=Math.sqrt(dr*dr+dg*dg+db*db);if(dist<=tol)d[i+3]=0;else if(dist<tol+soft&&soft>0)d[i+3]=Math.round(d[i+3]*(dist-tol)/soft);if(d[i+1]>d[i]*1.15&&d[i+1]>d[i+2]*1.15&&dist<tol+soft*2)d[i+1]=Math.max(d[i],d[i+2])}x.putImageData(id,0,0);f.src=c.toDataURL("image/png");const b=await alphaBounds(f.src);f.alphaBounds={x:b.x,y:b.y,w:b.w,h:b.h};f.charBounds={...f.alphaBounds};Object.assign(f,{bodyAligned:false,bodyBounds:undefined,bodyAnchorX:undefined,bodyGroundY:undefined,manualBodyAnchor:false})}
+    for(const f of targets){const image=await loadImage(f.src),c=document.createElement("canvas");c.width=image.naturalWidth;c.height=image.naturalHeight;const x=c.getContext("2d",{willReadFrequently:true});x.drawImage(image,0,0);const id=x.getImageData(0,0,c.width,c.height),d=id.data;for(let i=0;i<d.length;i+=4){const dr=d[i]-target.r,dg=d[i+1]-target.g,db=d[i+2]-target.b,dist=Math.sqrt(dr*dr+dg*dg+db*db);if(dist<=tol)d[i+3]=0;else if(dist<tol+soft&&soft>0)d[i+3]=Math.round(d[i+3]*(dist-tol)/soft);if(d[i+1]>d[i]*1.15&&d[i+1]>d[i+2]*1.15&&dist<tol+soft*2)d[i+1]=Math.max(d[i],d[i+2])}x.putImageData(id,0,0);f.src=c.toDataURL("image/png");const b=await alphaBounds(f.src);f.alphaBounds={x:b.x,y:b.y,w:b.w,h:b.h};f.charBounds={...f.alphaBounds};Object.assign(f,{bodyAligned:false,alignmentMode:undefined,bodyBounds:undefined,bodyAnchorX:undefined,rightFootX:undefined,bodyGroundY:undefined,manualBodyAnchor:false})}
     images.clear();status("Background removed");renderAll();toast("Background removed","success");
   }
   async function enhanceFrames(all) {
@@ -726,7 +746,7 @@
       f.src=c.toDataURL("image/png");f.sourceWidth=w;f.sourceHeight=h;f.scale/=factor;
       ["charBounds","alphaBounds"].forEach((key)=>{f[key]={x:f[key].x*factor,y:f[key].y*factor,w:f[key].w*factor,h:f[key].h*factor}});
       if(f.bodyBounds)f.bodyBounds={x:f.bodyBounds.x*factor,y:f.bodyBounds.y*factor,w:f.bodyBounds.w*factor,h:f.bodyBounds.h*factor};
-      if(Number.isFinite(f.bodyAnchorX))f.bodyAnchorX*=factor;if(Number.isFinite(f.bodyGroundY))f.bodyGroundY*=factor;
+      if(Number.isFinite(f.bodyAnchorX))f.bodyAnchorX*=factor;if(Number.isFinite(f.rightFootX))f.rightFootX*=factor;if(Number.isFinite(f.bodyGroundY))f.bodyGroundY*=factor;
     }
     images.clear();status("Visual enhancement complete");renderAll();toast(`${targets.length} frame${targets.length===1?"":"s"} enhanced in ${mode==="pixel"?"Pixel Art":"Anime Smooth"} mode`,"success");
   }
@@ -758,11 +778,11 @@
     const out=document.createElement("canvas");out.width=size.w;out.height=size.h;const x=out.getContext("2d");x.imageSmoothingEnabled=true;x.imageSmoothingQuality="high";x.drawImage(base,0,0,size.w,size.h);return out;
   }
   function prefix(){return($("#exportPrefix").value||state.projectName||"animation").trim().replace(/[^\w-]+/g,"_").replace(/^_+|_+$/g,"").toLowerCase()||"animation"}
-  function metadata(cols,size,exportFrames=state.frames){return{animation:prefix(),fps:state.fps,loop:state.loop,frame_width:size.w,frame_height:size.h,frames:exportFrames.length,horizontal_frames:Math.min(cols,exportFrames.length),vertical_frames:Math.ceil(exportFrames.length/cols),durations_ms:exportFrames.map(f=>f.duration),reference_frame:Math.max(0,exportFrames.findIndex(f=>f.id===state.referenceId)),alignment:$("#alignByBody")?.checked?"body":"manual",body_alignment:exportFrames.map(f=>({body_anchor_x:f.bodyAnchorX??null,ground_y:f.bodyGroundY??null,manual_offset_x:f.manualOffsetX||0,manual_offset_y:f.manualOffsetY||0}))}}
+  function metadata(cols,size,exportFrames=state.frames){return{animation:prefix(),fps:state.fps,loop:state.loop,frame_width:size.w,frame_height:size.h,frames:exportFrames.length,horizontal_frames:Math.min(cols,exportFrames.length),vertical_frames:Math.ceil(exportFrames.length/cols),durations_ms:exportFrames.map(f=>f.duration),reference_frame:Math.max(0,exportFrames.findIndex(f=>f.id===state.referenceId)),alignment:$("#alignByBody")?.checked?state.alignmentMode:"manual",alignment_mode:state.alignmentMode,body_alignment:exportFrames.map(f=>({body_anchor_x:f.bodyAnchorX??null,right_foot_x:f.rightFootX??null,ground_y:f.bodyGroundY??null,manual_offset_x:f.manualOffsetX||0,manual_offset_y:f.manualOffsetY||0}))}}
   async function framesForExport(){
     if(!$("#alignByBody").checked)return state.frames;
-    if(state.frames.every((frame)=>frame.bodyAligned&&Number.isFinite(frame.bodyAnchorX)&&Number.isFinite(frame.bodyGroundY)))return state.frames;
-    return(await prepareHeadToFeetFrames()).frames;
+    if(state.frames.every((frame)=>frame.bodyAligned&&frame.alignmentMode===state.alignmentMode&&Number.isFinite(frame.bodyAnchorX)&&Number.isFinite(frame.rightFootX)&&Number.isFinite(frame.bodyGroundY)))return state.frames;
+    return(await prepareHeadToFeetFrames(state.frames,{mode:state.alignmentMode})).frames;
   }
   async function exportSheet(){
     if(!state.frames.length)return;
@@ -826,11 +846,11 @@
     bindNumber("#propX",v=>{const f=selected();commit();setManualPosition(f,v,f.y);renderAll()});bindNumber("#propY",v=>{const f=selected();commit();setManualPosition(f,f.x,v);renderAll()});bindNumber("#propScale",v=>{const f=selected();commit();f.scale=clamp(v,.05,10);renderAll()});bindNumber("#propRotation",v=>{const f=selected();commit();f.rotation=v;renderAll()});
     $("#propScaleRange").onpointerdown=()=>{if(selected())commit()};$("#propScaleRange").onkeydown=e=>{if(["ArrowLeft","ArrowRight","Home","End","PageUp","PageDown"].includes(e.key)&&selected())commit()};$("#propScaleRange").oninput=e=>{const f=selected();if(!f)return;f.scale=clamp(Number(e.target.value)/100,.05,4);$("#propScale").value=Math.round(f.scale*1000)/1000;$("#propScaleOutput").textContent=`${Math.round(f.scale*100)}%`;renderCanvas()};
     $("#scaleDownBtn").onclick=()=>{const f=selected();if(!f)return;commit();f.scale=clamp(f.scale*.9,.05,10);renderAll()};$("#scaleResetBtn").onclick=()=>{const f=selected();if(!f)return;commit();f.scale=1;renderAll()};$("#scaleUpBtn").onclick=()=>{const f=selected();if(!f)return;commit();f.scale=clamp(f.scale*1.1,.05,10);renderAll()};
-    [["#boundX","x"],["#boundY","y"],["#boundW","w"],["#boundH","h"]].forEach(([id,key])=>bindNumber(id,v=>{const f=selected();commit();f.charBounds[key]=["w","h"].includes(key)?Math.max(1,v):v;Object.assign(f,{manualBodyAnchor:true,bodyAligned:false,bodyBounds:{...f.charBounds},bodyAnchorX:f.charBounds.x+f.charBounds.w/2,bodyGroundY:f.charBounds.y+f.charBounds.h,bodyConfidence:1,bodySource:"manual anchor"});renderAll()}));
+    [["#boundX","x"],["#boundY","y"],["#boundW","w"],["#boundH","h"]].forEach(([id,key])=>bindNumber(id,v=>{const f=selected();commit();f.charBounds[key]=["w","h"].includes(key)?Math.max(1,v):v;Object.assign(f,{manualBodyAnchor:true,bodyAligned:false,alignmentMode:undefined,bodyBounds:{...f.charBounds},bodyAnchorX:f.charBounds.x+f.charBounds.w/2,rightFootX:f.charBounds.x+f.charBounds.w*.72,bodyGroundY:f.charBounds.y+f.charBounds.h,bodyConfidence:1,bodySource:"manual anchor"});renderAll()}));
     bindNumber("#durationInput",v=>{const f=selected();commit();f.duration=Math.max(10,v);renderAll()});
     $("#centerBtn").onclick=()=>{const f=selected();commit();const patch=centerPatch(f);setManualPosition(f,patch.x,f.y);renderAll()};$("#alignBtn").onclick=()=>{const f=selected();commit();const patch=groundPatch(f);setManualPosition(f,f.x,patch.y);renderAll()};
     $("#detectBtn").onclick=detectBounds;$("#referenceBtn").onclick=()=>{const f=selected();commit();state.referenceId=f.id;renderAll()};$("#matchBtn").onclick=()=>{const f=selected(),r=reference();if(!f||!r)return;commit();Object.assign(f,match(f,r));renderAll()};
-    $("#trimBtn").onclick=trim;$("#fitFrameBtn").onclick=fitFrame;$("#alignBodyBtn").onclick=normalize;$("#resetBtn").onclick=()=>{const f=selected();if(!f)return;commit();Object.assign(f,{x:0,y:0,scale:1,rotation:0,charBounds:{...f.alphaBounds},bodyBounds:undefined,bodyAnchorX:undefined,bodyGroundY:undefined,autoX:0,autoY:0,manualOffsetX:0,manualOffsetY:0,bodyAligned:false,manualBodyAnchor:false});renderAll()};
+    $("#trimBtn").onclick=trim;$("#fitFrameBtn").onclick=fitFrame;$("#alignBodyBtn").onclick=()=>normalize("body");$("#alignRightFootBtn").onclick=()=>normalize("rightFoot");$("#alignmentMode").onchange=e=>{commit();state.alignmentMode=e.target.value==="rightFoot"?"rightFoot":"body";renderAll()};$("#resetBtn").onclick=()=>{const f=selected();if(!f)return;commit();Object.assign(f,{x:0,y:0,scale:1,rotation:0,charBounds:{...f.alphaBounds},bodyBounds:undefined,bodyAnchorX:undefined,rightFootX:undefined,bodyGroundY:undefined,autoX:0,autoY:0,manualOffsetX:0,manualOffsetY:0,bodyAligned:false,alignmentMode:undefined,manualBodyAnchor:false});renderAll()};
     bindNumber("#canvasWidth",v=>{commit();state.canvasWidth=clamp(v,16,4096);renderAll();fitZoom()});bindNumber("#canvasHeight",v=>{commit();state.canvasHeight=clamp(v,16,4096);renderAll();fitZoom()});
     ["#groundLine","#anchorLine","#rulerHeight","#rulerPosition"].forEach((id)=>{$(id).onpointerdown=()=>commit();$(id).onkeydown=e=>{if(["ArrowLeft","ArrowRight","Home","End","PageUp","PageDown"].includes(e.key))commit()}});
     $("#groundLine").oninput=e=>{state.groundRatio=Number(e.target.value)/100;$("#groundOutput").textContent=`${e.target.value}%`;renderCanvas()};
@@ -919,7 +939,7 @@
         syncInputs();renderCanvas();status(`Scale ruler ${Math.round(state.canvasHeight*state.targetHeightRatio)} px`);return;
       }
       const f=selected();if(!f)return;const dx=p.x-pointerDrag.p.x,dy=p.y-pointerDrag.p.y;
-      if(pointerDrag.kind==="move"){setManualPosition(f,pointerDrag.x+dx,pointerDrag.y+dy)}else{f.charBounds.x=pointerDrag.b.x+dx/f.scale;f.charBounds.y=pointerDrag.b.y+dy/f.scale;Object.assign(f,{manualBodyAnchor:true,bodyAligned:false,bodyBounds:{...f.charBounds},bodyAnchorX:f.charBounds.x+f.charBounds.w/2,bodyGroundY:f.charBounds.y+f.charBounds.h,bodyConfidence:1,bodySource:"manual anchor"})}
+      if(pointerDrag.kind==="move"){setManualPosition(f,pointerDrag.x+dx,pointerDrag.y+dy)}else{f.charBounds.x=pointerDrag.b.x+dx/f.scale;f.charBounds.y=pointerDrag.b.y+dy/f.scale;Object.assign(f,{manualBodyAnchor:true,bodyAligned:false,alignmentMode:undefined,bodyBounds:{...f.charBounds},bodyAnchorX:f.charBounds.x+f.charBounds.w/2,rightFootX:f.charBounds.x+f.charBounds.w*.72,bodyGroundY:f.charBounds.y+f.charBounds.h,bodyConfidence:1,bodySource:"manual anchor"})}
       renderInspector();renderCanvas();
     };
     canvas.onpointerup=()=>{

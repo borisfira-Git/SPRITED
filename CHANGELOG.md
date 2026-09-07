@@ -1,5 +1,11 @@
 # SPRITED version history
 
+## 0.6.10
+
+- Added `Align All Frames to Right Foot`, which locks the detected end of the right foot to the Reference Frame on both X and the ground line.
+- Added a pink right-foot marker to Body Debug and right-foot alignment data to exported JSON metadata.
+- Kept the existing body alignment mode, shared animation Scale, and manual X/Y corrections intact during export.
+
 ## 0.6.9
 
 - Added body-based alignment using a pelvis/lower-body anchor instead of the full alpha bounding box.

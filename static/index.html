@@ -13,7 +13,7 @@
 <body>
 <div class="app-shell">
   <header class="topbar">
-    <div class="brand"><div class="brand-mark"><span></span><span></span><span></span><span></span></div><div class="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div><span class="version-badge">VER.0.6.9</span></div>
+    <div class="brand"><div class="brand-mark"><span></span><span></span><span></span><span></span></div><div class="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div><span class="version-badge">VER.0.6.10</span></div>
     <div class="project-title"><input id="projectName" value="Untitled Animation" aria-label="Project name"><span id="saveState">Local project</span></div>
     <nav class="toolbar">
       <button id="newBtn">＋ New</button><button id="openBtn">⌁ Open</button><button id="saveBtn">↓ Save</button><i></i>
@@ -76,8 +76,10 @@
       <section class="property-section"><button class="section-title"><span>Canvas</span><span>⌃</span></button><div class="section-body">
         <div class="field-grid"><label>Width<input id="canvasWidth" type="number" value="512"></label><label>Height<input id="canvasHeight" type="number" value="512"></label></div>
         <label class="range-field"><span>Ground line <output id="groundOutput">88%</output></span><input id="groundLine" type="range" min="50" max="98" value="88"></label>
+        <label>Alignment point<select id="alignmentMode"><option value="body">Body center</option><option value="rightFoot">Right foot end</option></select></label>
         <button id="alignBodyBtn" class="wide-action accent">Align All Frames to Body</button>
-        <p class="helper">Aligns the pelvis/body axis and feet while ignoring narrow side extensions. One shared Scale is used for the whole animation.</p>
+        <button id="alignRightFootBtn" class="wide-action accent">Align All Frames to Right Foot</button>
+        <p class="helper">Body keeps the pelvis axis fixed. Right Foot keeps the end of the character's right foot fixed on both X and the ground line. One shared Scale is used for the whole animation.</p>
       </div></section>
       <section class="property-section"><button class="section-title"><span>Anchor & Size Ruler</span><span>⌃</span></button><div class="section-body">
         <p class="helper">With the Anchor tool, drag the ruler body up/down or drag its top and bottom handles. The measured pixel height is your Scale reference.</p>
@@ -124,7 +126,7 @@
     <label>Frame quality<select id="exportResolution"><option value="current">Current editor size</option><option value="256">256 × 256</option><option value="512">512 × 512</option><option value="1024" selected>1024 × 1024</option><option value="2048">2048 × 2048</option></select></label>
     <label class="full-field">File prefix<input id="exportPrefix" value="animation"></label>
   </div>
-  <label class="export-option"><input id="alignByBody" type="checkbox" checked><span><strong>Align by Body</strong><small>Uses the alignment stored in the editor and preserves every manual X/Y correction during export.</small></span></label>
+  <label class="export-option"><input id="alignByBody" type="checkbox" checked><span><strong>Align by Body</strong><small>Uses the selected Body or Right Foot alignment stored in the editor and preserves every manual X/Y correction during export.</small></span></label>
   <div class="export-folder"><div><strong>Default export folder</strong><small id="exportFolderName">Not selected — exports use Downloads</small></div><button id="chooseExportFolderBtn">Choose folder</button></div>
   <div class="export-actions"><button id="exportSheetBtn" class="primary">Export Sprite Sheet</button><button id="exportFramesBtn">Export Separate Frames</button></div>
 </div></div>

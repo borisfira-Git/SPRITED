@@ -12,7 +12,8 @@ import {
 } from "react";
 
 type Bounds = { x: number; y: number; w: number; h: number };
-type BodyGeometry = { bounds: Bounds; anchorX: number; groundY: number; confidence: number; source: string };
+type AlignmentMode = "body" | "rightFoot";
+type BodyGeometry = { bounds: Bounds; anchorX: number; rightFootX: number; groundY: number; confidence: number; source: string };
 type Frame = {
   id: string;
   name: string;
@@ -28,6 +29,7 @@ type Frame = {
   alphaBounds: Bounds;
   bodyBounds?: Bounds;
   bodyAnchorX?: number;
+  rightFootX?: number;
   bodyGroundY?: number;
   bodyConfidence?: number;
   bodySource?: string;
@@ -36,6 +38,7 @@ type Frame = {
   manualOffsetX?: number;
   manualOffsetY?: number;
   bodyAligned?: boolean;
+  alignmentMode?: AlignmentMode;
   manualBodyAnchor?: boolean;
 };
 type ProjectData = {
@@ -49,6 +52,7 @@ type ProjectData = {
   canvasWidth: number;
   canvasHeight: number;
   groundRatio: number;
+  alignmentMode?: AlignmentMode;
   fps: number;
   loop: boolean;
 };
@@ -198,6 +202,7 @@ function fullAlphaBody(frame: Frame, source = "full alpha"): BodyGeometry {
   return {
     bounds: { ...bounds },
     anchorX: bounds.x + bounds.w / 2,
+    rightFootX: bounds.x + bounds.w * 0.72,
     groundY: bounds.y + bounds.h,
     confidence: 0.1,
     source,
@@ -300,6 +305,14 @@ function detectBodyGeometry(canvas: HTMLCanvasElement): BodyGeometry | null {
       break;
     }
   }
+  const footTop = Math.max(lowerStart, Math.round(ground - bodyHeight * 0.2));
+  const footXs: number[] = [];
+  for (let y = footTop; y <= ground; y += 1) {
+    for (const x of rows[y]) {
+      if (x >= anchorX - coreWidth * 0.08 && x <= anchorX + coreWidth * 0.95) footXs.push(x);
+    }
+  }
+  const rightFootX = footXs.length >= 4 ? percentile(footXs, 0.92) : anchorX + coreWidth * 0.32;
   const top = Math.round(body.minY + bodyHeight * 0.12);
   const left = clamp(Math.round(anchorX - coreWidth * 0.64), 0, width - 1);
   const right = clamp(Math.round(anchorX + coreWidth * 0.64), left + 1, width);
@@ -310,6 +323,7 @@ function detectBodyGeometry(canvas: HTMLCanvasElement): BodyGeometry | null {
   return {
     bounds: { x: left, y: top, w: right - left, h: Math.max(1, ground + 1 - top) },
     anchorX,
+    rightFootX,
     groundY: ground + 1,
     confidence,
     source: "body core",
@@ -375,6 +389,7 @@ export default function Sprited() {
   const [canvasWidth, setCanvasWidth] = useState(512);
   const [canvasHeight, setCanvasHeight] = useState(512);
   const [groundRatio, setGroundRatio] = useState(0.88);
+  const [alignmentMode, setAlignmentMode] = useState<AlignmentMode>("body");
   const [fps, setFps] = useState(12);
   const [loop, setLoop] = useState(true);
   const [playing, setPlaying] = useState(false);
@@ -453,10 +468,11 @@ export default function Sprited() {
       canvasWidth,
       canvasHeight,
       groundRatio,
+      alignmentMode,
       fps,
       loop,
     }),
-    [projectName, frames, selectedId, selectedIds, selectionAnchorId, referenceId, canvasWidth, canvasHeight, groundRatio, fps, loop],
+    [projectName, frames, selectedId, selectedIds, selectionAnchorId, referenceId, canvasWidth, canvasHeight, groundRatio, alignmentMode, fps, loop],
   );
 
   const restore = useCallback((data: Snapshot) => {
@@ -476,6 +492,7 @@ export default function Sprited() {
     setCanvasWidth(data.canvasWidth || 512);
     setCanvasHeight(data.canvasHeight || 512);
     setGroundRatio(data.groundRatio || 0.88);
+    setAlignmentMode(data.alignmentMode === "rightFoot" ? "rightFoot" : "body");
     setFps(data.fps || 12);
     setLoop(data.loop ?? true);
     imageCache.clear();
@@ -547,6 +564,23 @@ export default function Sprited() {
       return { x: draw.x + anchorX * frame.scale, y: draw.y + groundY * frame.scale };
     },
     [getDrawRect],
+  );
+
+  const renderedAlignmentAnchor = useCallback(
+    (frame: Frame, mode: AlignmentMode = alignmentMode) => {
+      const draw = getDrawRect(frame);
+      const bodyX = Number.isFinite(frame.bodyAnchorX)
+        ? frame.bodyAnchorX!
+        : frame.charBounds.x + frame.charBounds.w / 2;
+      const anchorX = mode === "rightFoot" && Number.isFinite(frame.rightFootX)
+        ? frame.rightFootX!
+        : bodyX;
+      const groundY = Number.isFinite(frame.bodyGroundY)
+        ? frame.bodyGroundY!
+        : frame.charBounds.y + frame.charBounds.h;
+      return { x: draw.x + anchorX * frame.scale, y: draw.y + groundY * frame.scale };
+    },
+    [alignmentMode, getDrawRect],
   );
 
   const renderedBodyBounds = useCallback(
@@ -634,6 +668,7 @@ export default function Sprited() {
       }
       if (showBodyDebug && frame) {
         const anchor = renderedBodyAnchor(frame);
+        const foot = renderedAlignmentAnchor(frame, "rightFoot");
         const body = renderedBodyBounds(frame);
         ctx.setLineDash([8, 5]);
         ctx.lineWidth = 5;
@@ -659,10 +694,24 @@ export default function Sprited() {
         ctx.lineWidth = 2;
         ctx.strokeStyle = "#63d8ff";
         ctx.strokeRect(body.x, body.y, body.w, body.h);
+        ctx.lineWidth = 7;
+        ctx.strokeStyle = "#28140d";
+        ctx.beginPath();
+        ctx.arc(foot.x, foot.y, 9, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = "#ff73c7";
+        ctx.beginPath();
+        ctx.arc(foot.x, foot.y, 9, 0, Math.PI * 2);
+        ctx.moveTo(foot.x - 13, foot.y);
+        ctx.lineTo(foot.x + 13, foot.y);
+        ctx.moveTo(foot.x, foot.y - 13);
+        ctx.lineTo(foot.x, foot.y + 13);
+        ctx.stroke();
       }
       ctx.restore();
     },
-    [canvasWidth, canvasHeight, getDrawRect, groundRatio, renderedBodyAnchor, renderedBodyBounds, renderedCharacterBounds, showBodyDebug, showBounds, showGrid, showGround],
+    [canvasWidth, canvasHeight, getDrawRect, groundRatio, renderedAlignmentAnchor, renderedBodyAnchor, renderedBodyBounds, renderedCharacterBounds, showBodyDebug, showBounds, showGrid, showGround],
   );
 
   useEffect(() => {
@@ -902,10 +951,12 @@ export default function Sprited() {
                 charBounds,
                 bodyBounds: { ...charBounds },
                 bodyAnchorX: charBounds.x + charBounds.w / 2,
+                rightFootX: charBounds.x + charBounds.w * 0.72,
                 bodyGroundY: charBounds.y + charBounds.h,
                 bodyConfidence: 1,
                 bodySource: "manual anchor",
                 bodyAligned: false,
+                alignmentMode: undefined,
                 manualBodyAnchor: true,
               };
             })()
@@ -1025,13 +1076,14 @@ export default function Sprited() {
   function manualBodyGeometry(frame: Frame): BodyGeometry | null {
     if (!frame.manualBodyAnchor) return null;
     const bounds = frame.charBounds;
-    return { bounds: { ...bounds }, anchorX: bounds.x + bounds.w / 2, groundY: bounds.y + bounds.h, confidence: 1, source: "manual anchor" };
+    return { bounds: { ...bounds }, anchorX: bounds.x + bounds.w / 2, rightFootX: Number.isFinite(frame.rightFootX) ? frame.rightFootX! : bounds.x + bounds.w * 0.72, groundY: bounds.y + bounds.h, confidence: 1, source: "manual anchor" };
   }
 
   function geometryFromReference(frame: Frame, refFrame: Frame, refGeometry: BodyGeometry): BodyGeometry {
     const bounds = frame.alphaBounds;
     const referenceBounds = refFrame.alphaBounds;
     const normalizedX = (refGeometry.anchorX - referenceBounds.x) / Math.max(1, referenceBounds.w);
+    const normalizedRightFoot = (refGeometry.rightFootX - referenceBounds.x) / Math.max(1, referenceBounds.w);
     const normalizedGround = (refGeometry.groundY - referenceBounds.y) / Math.max(1, referenceBounds.h);
     const normalizedWidth = refGeometry.bounds.w / Math.max(1, referenceBounds.w);
     const normalizedTop = (refGeometry.bounds.y - referenceBounds.y) / Math.max(1, referenceBounds.h);
@@ -1042,7 +1094,7 @@ export default function Sprited() {
       w: Math.max(1, Math.min(frame.sourceWidth, bounds.w * normalizedWidth)),
       h: Math.max(1, Math.min(frame.sourceHeight, bounds.h * normalizedHeight)),
     };
-    return { bounds: bodyBounds, anchorX: bounds.x + bounds.w * normalizedX, groundY: bounds.y + bounds.h * normalizedGround, confidence: 0.45, source: "reference frame" };
+    return { bounds: bodyBounds, anchorX: bounds.x + bounds.w * normalizedX, rightFootX: bounds.x + bounds.w * normalizedRightFoot, groundY: bounds.y + bounds.h * normalizedGround, confidence: 0.45, source: "reference frame" };
   }
 
   function resolveBodyGeometry(frame: Frame, detected: BodyGeometry | null, refFrame: Frame | null, refGeometry: BodyGeometry | null, isReference: boolean) {
@@ -1054,7 +1106,8 @@ export default function Sprited() {
     return fullAlphaBody(frame);
   }
 
-  async function prepareHeadToFeetFrames(sourceFrames = frames, options: { targetFromGuides?: boolean } = {}) {
+  async function prepareHeadToFeetFrames(sourceFrames = frames, options: { targetFromGuides?: boolean; mode?: AlignmentMode } = {}) {
+    const mode = options.mode || alignmentMode;
     const measured: Array<{ frame: Frame; detected: BodyGeometry | null }> = [];
     for (const frame of sourceFrames) {
       const image = await loadImage(frame.src);
@@ -1067,7 +1120,7 @@ export default function Sprited() {
         detected: detectBodyGeometry(canvas),
       });
     }
-    if (!measured.length) return { frames: [] as Frame[], method: "body" };
+    if (!measured.length) return { frames: [] as Frame[], method: mode };
     const referenceEntry = measured.find(({ frame }) => frame.id === referenceId) || measured[0];
     const rawReference = manualBodyGeometry(referenceEntry.frame)
       || (referenceEntry.detected
@@ -1093,9 +1146,15 @@ export default function Sprited() {
     const sharedScale = clamp(Math.min(requestedScale, safeScale), 0.05, 10);
     let targetAxis = canvasWidth / 2;
     let targetGround = canvasHeight * groundRatio;
-    if (!options.targetFromGuides && referenceResult.frame.bodyAligned && Number.isFinite(referenceResult.frame.autoX) && Number.isFinite(referenceResult.frame.autoY)) {
-      targetAxis = canvasWidth / 2 - (referenceResult.frame.sourceWidth * sharedScale) / 2 + referenceResult.frame.autoX! + referenceResult.geometry.anchorX * sharedScale;
+    const referenceAnchorX = mode === "rightFoot" ? referenceResult.geometry.rightFootX : referenceResult.geometry.anchorX;
+    if (!options.targetFromGuides && referenceResult.frame.bodyAligned && referenceResult.frame.alignmentMode === mode && Number.isFinite(referenceResult.frame.autoX) && Number.isFinite(referenceResult.frame.autoY)) {
+      targetAxis = canvasWidth / 2 - (referenceResult.frame.sourceWidth * sharedScale) / 2 + referenceResult.frame.autoX! + referenceAnchorX * sharedScale;
       targetGround = canvasHeight / 2 - (referenceResult.frame.sourceHeight * sharedScale) / 2 + referenceResult.frame.autoY! + referenceResult.geometry.groundY * sharedScale;
+    } else if (!options.targetFromGuides && mode === "rightFoot") {
+      const baseX = referenceResult.frame.bodyAligned && Number.isFinite(referenceResult.frame.autoX) ? referenceResult.frame.autoX! : referenceResult.frame.x;
+      const baseY = referenceResult.frame.bodyAligned && Number.isFinite(referenceResult.frame.autoY) ? referenceResult.frame.autoY! : referenceResult.frame.y;
+      targetAxis = canvasWidth / 2 - (referenceResult.frame.sourceWidth * sharedScale) / 2 + baseX + referenceAnchorX * sharedScale;
+      targetGround = canvasHeight / 2 - (referenceResult.frame.sourceHeight * sharedScale) / 2 + baseY + referenceResult.geometry.groundY * sharedScale;
     }
     const normalized = resolved.map(({ frame, geometry }) => {
       const manualOffsetX = Number.isFinite(frame.manualOffsetX) ? frame.manualOffsetX! : 0;
@@ -1108,26 +1167,28 @@ export default function Sprited() {
         charBounds: { ...geometry.bounds },
         bodyBounds: { ...geometry.bounds },
         bodyAnchorX: geometry.anchorX,
+        rightFootX: geometry.rightFootX,
         bodyGroundY: geometry.groundY,
         bodyConfidence: geometry.confidence,
         bodySource: geometry.source,
       };
-      const autoX = measuredFrame.x + targetAxis - renderedBodyAnchor(measuredFrame).x;
+      const autoX = measuredFrame.x + targetAxis - renderedAlignmentAnchor(measuredFrame, mode).x;
       const groundedFrame = { ...measuredFrame, x: autoX };
       const autoY = groundedFrame.y + targetGround - renderedBodyAnchor(groundedFrame).y;
-      return { ...measuredFrame, autoX, autoY, manualOffsetX, manualOffsetY, x: autoX + manualOffsetX, y: autoY + manualOffsetY, bodyAligned: true };
+      return { ...measuredFrame, autoX, autoY, manualOffsetX, manualOffsetY, x: autoX + manualOffsetX, y: autoY + manualOffsetY, bodyAligned: true, alignmentMode: mode };
     });
-    return { frames: normalized, method: "body", referenceId: referenceResult.frame.id };
+    return { frames: normalized, method: mode, referenceId: referenceResult.frame.id };
   }
 
-  async function normalizeAll() {
+  async function normalizeAll(mode: AlignmentMode = alignmentMode) {
     if (!frames.length) return;
     pushHistory();
-    setStatus("Detecting body anchors in every frame…");
-    const result = await prepareHeadToFeetFrames();
+    setAlignmentMode(mode);
+    setStatus(mode === "rightFoot" ? "Detecting the right foot in every frame…" : "Detecting body anchors in every frame…");
+    const result = await prepareHeadToFeetFrames(frames, { mode });
     setFrames(result.frames);
-    setStatus("Frames aligned by body");
-    showToast(`Aligned ${result.frames.length} frames to the reference body`, "success");
+    setStatus(mode === "rightFoot" ? "Frames aligned by right foot" : "Frames aligned by body");
+    showToast(mode === "rightFoot" ? `Aligned ${result.frames.length} frames to the reference right foot` : `Aligned ${result.frames.length} frames to the reference body`, "success");
   }
 
   async function detectBounds() {
@@ -1135,7 +1196,7 @@ export default function Sprited() {
     pushHistory();
     const bounds = await alphaBounds(selected.src);
     const clean = { x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h };
-    updateFrame(selected.id, { charBounds: clean, alphaBounds: clean, bodyBounds: undefined, bodyAnchorX: undefined, bodyGroundY: undefined, bodyAligned: false, manualBodyAnchor: false });
+    updateFrame(selected.id, { charBounds: clean, alphaBounds: clean, bodyBounds: undefined, bodyAnchorX: undefined, rightFootX: undefined, bodyGroundY: undefined, bodyAligned: false, alignmentMode: undefined, manualBodyAnchor: false });
     showToast("Character box detected");
   }
 
@@ -1165,8 +1226,10 @@ export default function Sprited() {
       },
       bodyBounds: undefined,
       bodyAnchorX: undefined,
+      rightFootX: undefined,
       bodyGroundY: undefined,
       bodyAligned: false,
+      alignmentMode: undefined,
     });
     imageCache.clear();
     showToast("Transparent margins trimmed", "success");
@@ -1221,7 +1284,7 @@ export default function Sprited() {
       const src = canvas.toDataURL("image/png");
       const bounds = await alphaBounds(src);
       const clean = { x: bounds.x, y: bounds.y, w: bounds.w, h: bounds.h };
-      replacements.set(frame.id, { ...frame, src, alphaBounds: clean, charBounds: clean, bodyBounds: undefined, bodyAnchorX: undefined, bodyGroundY: undefined, bodyAligned: false, manualBodyAnchor: false });
+      replacements.set(frame.id, { ...frame, src, alphaBounds: clean, charBounds: clean, bodyBounds: undefined, bodyAnchorX: undefined, rightFootX: undefined, bodyGroundY: undefined, bodyAligned: false, alignmentMode: undefined, manualBodyAnchor: false });
     }
     setFrames((items) => items.map((frame) => replacements.get(frame.id) || frame));
     imageCache.clear();
@@ -1245,6 +1308,7 @@ export default function Sprited() {
       x: canvasWidth / 2 - (box.x + box.w / 2),
       y: canvasHeight / 2 - (box.y + box.h / 2),
       bodyAligned: false,
+      alignmentMode: undefined,
     });
   }
 
@@ -1287,9 +1351,11 @@ export default function Sprited() {
       vertical_frames: Math.ceil(exportFrames.length / columns),
       durations_ms: exportFrames.map((frame) => frame.duration),
       reference_frame: Math.max(0, exportFrames.findIndex((frame) => frame.id === referenceId)),
-      alignment: alignByBody ? "body" : "manual",
+      alignment: alignByBody ? alignmentMode : "manual",
+      alignment_mode: alignmentMode,
       body_alignment: exportFrames.map((frame) => ({
         body_anchor_x: frame.bodyAnchorX ?? null,
+        right_foot_x: frame.rightFootX ?? null,
         ground_y: frame.bodyGroundY ?? null,
         manual_offset_x: frame.manualOffsetX || 0,
         manual_offset_y: frame.manualOffsetY || 0,
@@ -1299,8 +1365,8 @@ export default function Sprited() {
 
   async function framesForExport() {
     if (!alignByBody) return frames;
-    if (frames.every((frame) => frame.bodyAligned && Number.isFinite(frame.bodyAnchorX) && Number.isFinite(frame.bodyGroundY))) return frames;
-    return (await prepareHeadToFeetFrames()).frames;
+    if (frames.every((frame) => frame.bodyAligned && frame.alignmentMode === alignmentMode && Number.isFinite(frame.bodyAnchorX) && Number.isFinite(frame.rightFootX) && Number.isFinite(frame.bodyGroundY))) return frames;
+    return (await prepareHeadToFeetFrames(frames, { mode: alignmentMode })).frames;
   }
 
   async function chooseExportDirectory() {
@@ -1581,7 +1647,7 @@ export default function Sprited() {
         <div className="brand">
           <div className="brand-mark"><span /><span /><span /><span /></div>
           <div className="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div>
-          <span className="version-badge">VER.0.6.9</span>
+          <span className="version-badge">VER.0.6.10</span>
         </div>
         <div className="project-title">
           <input value={projectName} onChange={(event) => { setProjectName(event.target.value); setDirty(true); }} aria-label="Project name" />
@@ -1717,7 +1783,7 @@ export default function Sprited() {
         <aside className="right-panel">
           <div className="panel-heading compact">
             <div><span className="eyebrow">INSPECTOR</span><h2>{selected ? `Frame ${selectedIndex + 1}${selectedIds.length > 1 ? ` · ${selectedIds.length} selected` : ""}` : "No frame selected"}</h2></div>
-            <button disabled={!selected} onClick={() => { if (!selected) return; pushHistory(); updateFrame(selected.id, { x: 0, y: 0, scale: 1, rotation: 0, charBounds: { ...selected.alphaBounds }, bodyBounds: undefined, bodyAnchorX: undefined, bodyGroundY: undefined, autoX: 0, autoY: 0, manualOffsetX: 0, manualOffsetY: 0, bodyAligned: false, manualBodyAnchor: false }); }}>Reset</button>
+            <button disabled={!selected} onClick={() => { if (!selected) return; pushHistory(); updateFrame(selected.id, { x: 0, y: 0, scale: 1, rotation: 0, charBounds: { ...selected.alphaBounds }, bodyBounds: undefined, bodyAnchorX: undefined, rightFootX: undefined, bodyGroundY: undefined, autoX: 0, autoY: 0, manualOffsetX: 0, manualOffsetY: 0, bodyAligned: false, alignmentMode: undefined, manualBodyAnchor: false }); }}>Reset</button>
           </div>
           {!selected ? <div className="inspector-empty"><b>◇</b><p>Select a frame to edit position, size and character bounds.</p></div> : (
             <>
@@ -1736,7 +1802,7 @@ export default function Sprited() {
               </InspectorSection>
               <InspectorSection title="Character Bounds">
                 <p className="helper">The orange box measures the character. Keep fire and aura outside it.</p>
-                <p className="helper">{Number.isFinite(selected.bodyAnchorX) ? `Body anchor X ${Math.round(selected.bodyAnchorX!)} · Ground Y ${Math.round(selected.bodyGroundY!)} · ${Math.round((selected.bodyConfidence || 0) * 100)}% · ${selected.bodySource || "body"}` : "Body anchor has not been measured."}</p>
+                <p className="helper">{Number.isFinite(selected.bodyAnchorX) ? `Body anchor X ${Math.round(selected.bodyAnchorX!)} · Right foot X ${Math.round(selected.rightFootX ?? selected.bodyAnchorX!)} · Ground Y ${Math.round(selected.bodyGroundY!)} · ${Math.round((selected.bodyConfidence || 0) * 100)}% · ${selected.bodySource || "body"}` : "Body anchor has not been measured."}</p>
                 <div className="field-grid four">
                   {(["x", "y", "w", "h"] as const).map((key) => (
                     <NumberField key={key} label={key.toUpperCase()} value={selected.charBounds[key]} onCommit={(value) => { pushHistory(); updateBounds(selected.id, { [key]: key === "w" || key === "h" ? Math.max(1, value) : value }); }} />
@@ -1757,8 +1823,10 @@ export default function Sprited() {
               <NumberField label="Height" value={canvasHeight} onCommit={(value) => { pushHistory(); setCanvasHeight(clamp(value, 16, 4096)); }} />
             </div>
             <label className="range-field"><span>Ground line <output>{Math.round(groundRatio * 100)}%</output></span><input type="range" min="50" max="98" value={groundRatio * 100} onChange={(event) => { setGroundRatio(Number(event.target.value) / 100); setDirty(true); }} /></label>
-            <button className="wide-action accent" onClick={() => void normalizeAll()}>Align All Frames to Body</button>
-            <p className="helper">Aligns the pelvis/body axis and feet while ignoring narrow side extensions. One shared Scale is used for the whole animation.</p>
+            <label>Alignment point<select value={alignmentMode} onChange={(event) => { pushHistory(); setAlignmentMode(event.target.value === "rightFoot" ? "rightFoot" : "body"); }}><option value="body">Body center</option><option value="rightFoot">Right foot end</option></select></label>
+            <button className="wide-action accent" onClick={() => void normalizeAll("body")}>Align All Frames to Body</button>
+            <button className="wide-action accent" onClick={() => void normalizeAll("rightFoot")}>Align All Frames to Right Foot</button>
+            <p className="helper">Body keeps the pelvis axis fixed. Right Foot keeps the end of the character&apos;s right foot fixed on both X and the ground line. One shared Scale is used for the whole animation.</p>
           </InspectorSection>
           <InspectorSection title="Background Removal">
             <div className="color-row">
@@ -1807,7 +1875,7 @@ export default function Sprited() {
             <div className="modal-header"><div><span className="eyebrow">EXPORT</span><h2>Export animation</h2><p>Create a Godot-ready sheet or individual PNG frames.</p></div><button onClick={() => setExportOpen(false)}>×</button></div>
             <div className="export-preview"><b>▦</b><div><strong>{frames.length} frames · {Math.min(exportColumns, Math.max(1, frames.length))} × {sheetRows} grid</strong><small>{canvasWidth * Math.min(exportColumns, Math.max(1, frames.length))} × {canvasHeight * sheetRows} px · transparent PNG</small></div></div>
             <div className="export-fields field-grid"><NumberField label="Sheet columns" value={exportColumns} onCommit={(value) => setExportColumns(Math.max(1, value))} /><label>File prefix<input value={exportPrefix} onChange={(event) => setExportPrefix(event.target.value)} /></label></div>
-            <label className="export-option"><input type="checkbox" checked={alignByBody} onChange={(event) => setAlignByBody(event.target.checked)} /><span><strong>Align by Body</strong><small>Uses the alignment stored in the editor and preserves every manual X/Y correction during export.</small></span></label>
+            <label className="export-option"><input type="checkbox" checked={alignByBody} onChange={(event) => setAlignByBody(event.target.checked)} /><span><strong>Align by Body</strong><small>Uses the selected Body or Right Foot alignment stored in the editor and preserves every manual X/Y correction during export.</small></span></label>
             <div className="export-folder"><div><strong>Default export folder</strong><small>{exportDirectoryName}</small></div><button onClick={() => void chooseExportDirectory()}>Choose folder</button></div>
             <div className="export-actions"><button className="primary" disabled={!frames.length} onClick={() => void exportSheet()}>Export Sprite Sheet</button><button disabled={!frames.length} onClick={() => void exportFrames()}>Export Separate Frames</button></div>
           </div>
