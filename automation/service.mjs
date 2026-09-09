@@ -21,7 +21,7 @@ export class Service {
     this.page=await this.browser.newPage();
     const source=existsSync(path.join(appRoot,'static/index.html'));
     const assets={'/':[source?'static/index.html':'app/index.html','text/html'],'/style.css':[source?'app/globals.css':'app/style.css','text/css'],'/app.js':[source?'static/app.js':'app/app.js','text/javascript'],'/video-import.js':[source?'public/video-import.js':'app/video-import.js','text/javascript'],'/og.png':[source?'public/og.png':'app/og.png','image/png']};
-    for(const name of ['character-workflow','character-panel','library-panel'])assets[`/${name}.js`]=[`${source?'public':'app'}/${name}.js`,'text/javascript'];
+    for(const name of ['character-workflow','character-panel','editor-bridge'])assets[`/${name}.js`]=[`${source?'public':'app'}/${name}.js`,'text/javascript'];
     await this.page.route('**/*',async route=>{
       const u=new URL(route.request().url());
       if(u.origin!=='http://sprited.local')return route.abort();

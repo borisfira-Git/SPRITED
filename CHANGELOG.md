@@ -1,3 +1,11 @@
+## 0.8.0-preview.3 — Independent SPRITED product shell
+
+- Replaced the default modal-over-editor experience with a dedicated navy four-column product, matching the supplied visual structure.
+- Added thumbnail character selection, animation cards, Use Result progression, compact result history and simple PNG export.
+- Settings separated from workflows. Old editor available only through a separate expert entry point.
+- SPRITED.exe opens the product; SPRITED-Advanced.exe retains manual editor capabilities. Backend/data formats preserved.
+- Packaged shell, legacy processing, automation, persistence and export regressions passed with synthetic test fixtures.
+
 ## 0.8.0-preview.2 — 2026-09-09
 
 - Simplified connected character workspace, minimal explicit creation and reference replacement, animation-scoped history, automatic status/video updates, obvious PNG export and collapsed advanced controls.

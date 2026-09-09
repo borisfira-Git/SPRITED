@@ -7,10 +7,12 @@ const js = await readFile(new URL("static/app.js", root), "utf8");
 const video = await readFile(new URL("public/video-import.js", root), "utf8");
 const workflow = await readFile(new URL("public/character-workflow.js", root), "utf8");
 const panel = await readFile(new URL("public/character-panel.js", root), "utf8");
+const bridge = await readFile(new URL("public/editor-bridge.js", root), "utf8");
 const library = await readFile(new URL("public/library-panel.js", root), "utf8");
 const og = await readFile(new URL("public/og.png", root));
 
 const worker = `const assets = {
+  "/editor-bridge.js": { type: "text/javascript; charset=utf-8", body: ${JSON.stringify(bridge)} },
   "/library-panel.js": { type: "text/javascript; charset=utf-8", body: ${JSON.stringify(library)} },
   "/character-workflow.js": { type: "text/javascript; charset=utf-8", body: ${JSON.stringify(workflow)} },
   "/character-panel.js": { type: "text/javascript; charset=utf-8", body: ${JSON.stringify(panel)} },

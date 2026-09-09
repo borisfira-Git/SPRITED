@@ -2,6 +2,7 @@ const number = (min,max,integer=false) => ({type:integer?'integer':'number',mini
 const text = {type:'string',minLength:1,maxLength:4096};
 const mode={type:'string',enum:['body','rightFoot','right_foot']};
 export const actions = {
+  'character/rename':{tool:'sprited_rename_character',description:'Rename a character without changing its reference or previous attempts.',properties:{id:text,name:{type:'string',minLength:1,maxLength:120}},required:['id','name']},
   'character/replace-reference':{tool:'sprited_replace_character_reference',description:'Replace one character reference atomically; preserve previous attempt snapshots.',properties:{id:text,path:text,name:text},required:['id','path','name']},
   'connections/status':{tool:'sprited_get_connection_status',description:'Distinguish SPRITED server readiness from a live external MCP client. Does not certify generation capability.',properties:{}},
   'connections/setup':{tool:'sprited_get_connection_setup',description:'Get this installation’s MCP entry point for manual setup.',properties:{}},

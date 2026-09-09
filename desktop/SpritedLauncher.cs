@@ -10,15 +10,15 @@ using System.Windows.Forms;
 [assembly: AssemblyProduct("SPRITED")]
 [assembly: AssemblyCopyright("Copyright © 2026 SPRITED")]
 [assembly: AssemblyVersion("0.8.0.0")]
-[assembly: AssemblyFileVersion("0.8.0.2")]
-[assembly: AssemblyInformationalVersion("0.8.0-preview.2")]
+[assembly: AssemblyFileVersion("0.8.0.3")]
+[assembly: AssemblyInformationalVersion("0.8.0-preview.3")]
 
 namespace SpritedDesktop
 {
     internal static class Program
     {
         private const string DisplayName = "SPRITED";
-        private const string DisplayVersion = "VER.0.8.0 PREVIEW 2";
+        private const string DisplayVersion = "VER.0.8.0 PREVIEW 3";
 
         [STAThread]
         private static void Main()

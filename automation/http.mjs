@@ -14,7 +14,8 @@ export async function serve(service,port=47821,token=process.env.SPRITED_TOKEN||
     const localHost=[`127.0.0.1:${server.address().port}`,`localhost:${server.address().port}`].includes(host);
     const url=new URL(req.url,'http://127.0.0.1');
     const root=fileURLToPath(new URL('../',import.meta.url)),source=existsSync(path.join(root,'static/index.html'));
-    const assets={'/ui/':[source?'static/index.html':'app/index.html','text/html'],'/ui/app.js':[source?'static/app.js':'app/app.js','text/javascript'],'/ui/style.css':[source?'app/globals.css':'app/style.css','text/css']};
+    const assets={'/ui/':[source?'public/shell.html':'app/shell.html','text/html'],'/ui/app.js':[source?'static/app.js':'app/app.js','text/javascript'],'/ui/style.css':[source?'app/globals.css':'app/style.css','text/css']};
+    assets['/ui/editor.html']=[source?'static/index.html':'app/index.html','text/html'];assets['/ui/shell.css']=[source?'public/shell.css':'app/shell.css','text/css'];assets['/ui/editor-bridge.js']=[source?'public/editor-bridge.js':'app/editor-bridge.js','text/javascript'];
     for(const name of ['video-import','character-workflow','character-panel','library-panel'])assets[`/ui/${name}.js`]=[`${source?'public':'app'}/${name}.js`,'text/javascript'];
     if(localHost&&req.method==='GET'&&Object.hasOwn(assets,url.pathname)){try{const [file,type]=assets[url.pathname];res.setHeader('content-type',type);res.end(await readFile(path.join(root,file)));}catch{res.writeHead(404);res.end();}return;}
     if((req.headers.origin&&req.headers.origin!==`http://${host}`) || !localHost || supplied.length!==expected.length || !timingSafeEqual(supplied,expected)){

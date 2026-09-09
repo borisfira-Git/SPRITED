@@ -1,3 +1,5 @@
+> Preview.3 update: SPRITED.exe now launches the independent four-step product. The legacy editor is SPRITED-Advanced.exe or Open Advanced Editor (separate window). See SHELL-REDESIGN.md for current navigation; older UI descriptions below are historical.
+
 # SPRITED 0.8.0-preview.2 — Character Library
 
 This extends the existing 0.7.0 desktop editor. It does not contain an AI animation generator.

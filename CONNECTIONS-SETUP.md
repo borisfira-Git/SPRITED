@@ -1,3 +1,5 @@
+> Preview.3 update: SPRITED.exe now launches the independent four-step product. The legacy editor is SPRITED-Advanced.exe or Open Advanced Editor (separate window). See SHELL-REDESIGN.md for current navigation; older UI descriptions below are historical.
+
 # SPRITED 0.8.0-preview.2 — manual MCP setup
 
 **READY FOR USER MCP CONNECTION TEST.** Internal tests use a controlled MCP client and synthetic video. Your actual Cline/Codex configuration and real generation have NOT been tested or changed.

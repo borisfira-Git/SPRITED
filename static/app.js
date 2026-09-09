@@ -1065,7 +1065,7 @@
   async function workflowAction(action,args){
     const W=SpritedWorkflow,w=state.workflow;
     const result=r=>structuredClone(r);
-    if(['character/create','character/replace-reference','character/list','character/select','character/trash','character/delete','character/restore','character/purge','jobs/create','jobs/list','jobs/get','jobs/claim','jobs/release','jobs/fail','jobs/submit-result','attempts/list','attempts/redo','attempts/reject'].includes(action)){
+    if(['character/create','character/rename','character/replace-reference','character/list','character/select','character/trash','character/delete','character/restore','character/purge','jobs/create','jobs/list','jobs/get','jobs/claim','jobs/release','jobs/fail','jobs/submit-result','attempts/list','attempts/redo','attempts/reject'].includes(action)){
       if(['character/create','character/replace-reference'].includes(action)){W.image(args.src);const img=await loadImage(args.src);if(img.naturalWidth*img.naturalHeight>4*1024*1024)throw Error('Reference exceeds 4 megapixels');}
       const next=structuredClone(w),output=W.library(next,action,args);state.workflow=next;if(action==='character/purge'){state.history=[];state.future=[];updateHistory();}return output;
     }

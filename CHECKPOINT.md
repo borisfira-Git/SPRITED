@@ -1,3 +1,44 @@
+# Current checkpoint — SPRITED 0.8.0-preview.3
+
+2026-09-09. The user explicitly authorized replacement of the normal UI shell. The attached navy four-column image is the concrete visual target. This milestone is complete independently of any Godot or real AI provider test.
+
+## Implemented
+
+The default `/ui/` document is now `public/shell.html`, with no legacy editor DOM and no SpritedCore in its window. `public/library-panel.js` renders the independent four-column workflow against existing API operations. `public/shell.css` supplies the navy reference layout, thumbnail sidebar, large previews, six animation cards, numbered steps, result arrows, green Use Result/export and responsive two-column/single-column layouts.
+
+Settings exposes Connections / Storage / Advanced Preferences. Old import/navigation/processing tabs are absent from the normal shell. Manual editing is a separate `/ui/editor.html` window, bridged by `public/editor-bridge.js`. The backend continues using the original engine. Source and API contracts retain existing actions, with one small added character/rename operation preserving IDs and references.
+
+`SPRITED.exe` now uses desktop/ProductLauncher.cs to open the connected product. `SPRITED-Advanced.exe` is built from the retained SpritedLauncher.cs. SPRITED-Library.cmd remains an alias for product launch. Packaging includes both entry points and all shell assets. Saved projects and workspace data require no migration.
+
+## Wiring
+
+Generate → jobs/create; Redo → attempts/redo; Use Result → animation/approve on selected attempt; Create SpriteSheet → spritesheet/create; Export PNG → registered authenticated sheet asset. The sheet action is gated until Use Result. Reusing the same video for multiple frame counts does not create a generation job. Advanced editor handoff uses animation/open and the existing editor-project snapshot endpoint.
+
+## Tests and evidence
+
+PASS source shell: shell-preview3-test.log. PASS packaged independent shell: shell-preview3-packaged.log. The latter explicitly hides Open Advanced Editor during the entire create/generate/review/Use Result/8-and-24-frame/PNG workflow; checks no legacy import DOM or SpritedCore exists in the product page; checks offline generation gate, simulated live MCP client, setup JSON/TOML, automatic video receipt, separate editor window, rename, replacement, redo/history, restart, and 1000px responsive width. All assets/video are synthetic tests; NO real AI generation is claimed.
+
+PASS library regression: library-preview3-test2.log (persistent data, claims, Trash/restore/permanent delete, shared-video sheets, processed 24-frame handoff into separate editor). Initial test needed an async status assertion correction after the UI change; corrected test passes.
+
+PASS automation-preview3-test.log and character-preview3-test.log: existing CLI/API/MCP, authentication, path scope, rollback, project compatibility, processing, export and operational memory. PASS video-preview3-test.log: existing advanced editor video workflow, undo/redo, manual edits, cleanup, alignment and PNG. PASS connections unit test and static build. No new Godot runtime testing, model install or actual user extension configuration performed.
+
+Packaged Windows GUI was tested through actual packaged service/HTTP/CLI/MCP and browser assets. Both Windows executables compiled; native product launcher code delegates to the existing startup script. Interactive double-click launcher behavior on the user's installed setup remains a user check (no user data/config touched).
+
+Screenshots: work/shell-preview3-packaged/eight-frame-shell.png, simple-library.png, compact-shell.png, connections.png. They were visually inspected. Their rectangle assets are explicitly synthetic; they do not demonstrate Guardian quality.
+
+## Files / version
+
+Version 0.8.0-preview.3, assembly 0.8.0.3. See SHELL-REDESIGN.md for main files and usage. Additional touched files: automation/service.mjs asset registration, static/index.html expert script, scripts/build-static.mjs and preview.mjs expert bridge, version metadata, tests/library.test.mjs and ux.test.mjs (delegates to shell.test.mjs). Default launch is intentionally a breaking UI change; no project schema bump.
+
+## Limits and next step
+
+An MCP connection is not a video generator. The user still manually configures their actual extension using CONNECTIONS-SETUP.md, then asks a real available provider to process a queued character request. Source submission is video-only; AUTO sampling is Uniform and SMART remains fallback. Existing expert edits are not automatically written back to immutable library sheet versions. Previous engine/quality limits remain. Preview uses native video controls rather than custom-painted controls; supplied example character art is not bundled.
+
+Next command for regression from source: set SPRITED_PLAYWRIGHT, SPRITED_TEST_VIDEO and a fresh SPRITED_TEST_WORKSPACE, then `node tests/shell.test.mjs`. To test a release set SPRITED_SERVICE_MODULE, SPRITED_HTTP_MODULE and SPRITED_CLI to its automation entry points. Continue in this existing repository. Do not reintroduce the old UI underneath the shell.
+
+---
+
+EOF
 # Current checkpoint — SPRITED 0.8.0-preview.2
 
 Updated 2026-09-09. Continue this existing codebase; previous checkpoint/history remains below. Current task is UX simplification and manual external-agent connection readiness. No real user extension configuration is authorized in this milestone.

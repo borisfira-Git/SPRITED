@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 
 const root = new URL("../", import.meta.url);
 const routes = {
+  "/editor-bridge.js": ["public/editor-bridge.js", "text/javascript; charset=utf-8"],
   "/library-panel.js": ["public/library-panel.js", "text/javascript; charset=utf-8"],
   "/character-workflow.js": ["public/character-workflow.js", "text/javascript; charset=utf-8"],
   "/character-panel.js": ["public/character-panel.js", "text/javascript; charset=utf-8"],
