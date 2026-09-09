@@ -1,3 +1,44 @@
+# Current checkpoint — SPRITED 0.8.0-preview.2
+
+Updated 2026-09-09. Continue this existing codebase; previous checkpoint/history remains below. Current task is UX simplification and manual external-agent connection readiness. No real user extension configuration is authorized in this milestone.
+
+## Implemented this milestone
+
+- public/library-panel.js: clean character sidebar/reference, explicit creation/replacement, six animations, animation-scoped history, offline Generate gate, automatic four-second result/video polling, simple review/redo, 8-frame default, 4/6/8/12/16/24 selection, sheet preview and PNG export. Advanced controls and export variants are collapsed. Selectors disable during updates to prevent dropped selection changes.
+- automation/connections.mjs: volatile live sessions, 30-second MCP heartbeat with 90-second expiry; server readiness is separate from external connection. Generation capability is never inferred from green status.
+- automation/{contracts,service,http,cli,mcp}.mjs: task-oriented connection status/setup/heartbeat/disconnect, reference replacement, existing sheet processing options and registered output downloads. MCP remains stdio with a localhost API proxy.
+- public/character-workflow.js and static/app.js: reference replacement through shared core and default eight-frame DEATH recipe. Existing snapshots retain their defaults. Sheet derivation preserves prior video approval.
+- automation/Open-Library.ps1: reconnect only to this release's CLI path; a different old live server gives restart guidance instead of silently opening obsolete UI.
+- VERSION, automation/package.json, desktop/SpritedLauncher.cs, static/index.html: 0.8.0-preview.2 branding/package metadata.
+- tests/connections.test.mjs and tests/ux.test.mjs added; tests/library.test.mjs adapted to auto-open/video UI; release MCP version updated.
+- LIBRARY-GUIDE.md, CONNECTIONS-SETUP.md, CHANGELOG.md and package documentation list updated.
+
+## Verification checkpoint
+
+INTERNALLY TESTED: source connection expiry; source UX with controlled MCP client; full source library persistence/Trash/editor/sheets; original core CLI/API/MCP/PNG/Godot regression; static build. An initial library test exposed an ignored rapid selection during refresh; selectors now disable during updates and the rerun passed.
+
+Windows package outputs/SPRITED-0.8.0-preview.2 was built; executable metadata is 0.8.0.2 / 0.8.0-preview.2. Packaged UX PASSED using its service, HTTP, CLI/MCP proxy and GUI assets; screenshots were inspected. 54 MCP tools register. Source character-workflow and browser video regression PASSED. Logs: work/ux-preview2-packaged.log, library-preview2-test2.log, automation-preview2-test.log, character-preview2-test.log, video-preview2-test.log. Earlier source UX: ux-test-01.log. Static build and JavaScript/PowerShell syntax checks passed.
+
+Godot: exported resource structure passed automation tests and headless asset import completed. Final Godot 4.5.1 load/check process crashed with signal 11 twice, including a compatibility-renderer retry; runtime load for preview.2 is NOT VERIFIED. Logs: work/godot-check-preview2/{import,run,retry}.log. Prior preview.1 runtime success is historical only. Native SPRITED.exe was compiled/version-checked; this task exercised the connected packaged browser GUI, not a fresh manual native-shell session.
+
+READY FOR USER TEST: manual MCP configuration from Settings → Connections; use the generated configuration with actual executable/path/port/token. See CONNECTIONS-SETUP.md.
+
+NOT YET TESTED: the user's Cline/Codex extension, a real external model, Guardian WALKING/ATTACK, semantic identity/gait quality. No model files downloaded. No actual external user connection is claimed.
+
+## Compatibility and known limits
+
+Project format remains version 1 with optional workflow extension. Library data stays in the existing workspace; no destructive migration. Standalone advanced editor and import/export processing are retained. Old readers may drop unknown metadata: keep project backups. Use a separate workspace when importing unrelated legacy projects because service project/open replaces that workspace's current state.
+
+AUTO sampling is Uniform; SMART explicitly falls back to Uniform. Static sheet preview plus existing video/editor animation playback. Agent integration is pull-based: a live MCP session does not launch a generator or wake an idle agent. UI polling is four seconds; abrupt agent exits may remain green up to 90 seconds. Connection endpoints share service serialization, so long processing can delay status. Source submission remains video-only. Semantic gait/face/equipment validation and learned model ranking remain unimplemented. Advanced editor corrections do not automatically update stored attempt versions.
+
+## Exact continuation
+
+After delivering preview.2, USER manually follows CONNECTIONS-SETUP.md and tests their extension. The next development milestone is a real available provider returning a genuine Guardian WALKING video through claim/submit-result, followed by visual review and exports. Do not use synthetic fixtures as evidence of real generation.
+
+Regression entry points: tests/ux.test.mjs and tests/library.test.mjs. Set SPRITED_PLAYWRIGHT, SPRITED_TEST_VIDEO and a fresh SPRITED_TEST_WORKSPACE. For a packaged test set SPRITED_SERVICE_MODULE, SPRITED_HTTP_MODULE and SPRITED_CLI to the extracted release files. Test data and logs are under the task work/ folder, outside source control.
+
+---
+
 # Current checkpoint — SPRITED 0.8.0-preview.1
 
 Updated 2026-09-09. Continue this existing clone. The latest user specification is the persistent Character Animation Library / external-agent job queue, not installing a local AI model. See `LIBRARY-GUIDE.md` for exact usage and honest feature status. Original 0.7.0 history is retained below.

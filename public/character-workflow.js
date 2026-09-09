@@ -7,7 +7,7 @@
   const definitions = [
     ['IDLE','Idle',true,25,8,'body',['low_jitter','consistent_scale','smooth_loop']],
     ['HIT','Hit',false,16,8,'body',['consistent_scale','readable_recoil']],
-    ['DEATH','Death',false,25,12,'body',['full_progression','final_down_pose']],
+    ['DEATH','Death',false,25,8,'body',['full_progression','final_down_pose']],
     ['ATTACK','Attack',false,25,8,'body',['anticipation','strike','recovery']],
     ['RANGE_ATTACK','Ranged attack',false,25,8,'body',['aim','release','recovery']],
     ['WALKING','Walking',true,25,8,'rightFoot',['baseline_consistency','left_right_alternation','smooth_loop']]
@@ -116,6 +116,7 @@
     if(action==='character/trash')return copy(w.characters.filter(c=>c.deleted_at));
     if(action==='character/create'){if(w.characters.length>=100)throw Error('Maximum 100 characters');const old=w.character_profile;w.character_profile=null;try{return setReference(w,{src:a.src,name:a.name,path:a.path});}catch(e){w.character_profile=old;throw e;}}
     if(action==='character/select'){const c=character(w,a.id);if(c.deleted_at)throw Error('Restore this character from Trash first');w.character_profile=copy(c);return copy(c);}
+    if(action==='character/replace-reference'){const c=character(w,a.id);if(c.deleted_at)throw Error('Restore this character first');w.character_profile=copy(c);return setReference(w,{src:a.src,name:c.name,path:a.path});}
     if(action==='character/delete'){const c=character(w,a.id);if(a.confirm_name!==c.name)throw Error('Confirm the exact character name to move it to Trash');c.deleted_at=now();if(w.character_profile?.id===c.id)w.character_profile=null;for(const j of w.jobs.filter(j=>j.character_id===c.id&&['QUEUED','CLAIMED','GENERATING'].includes(j.status))){j.status='CANCELLED';j.claim_token=null;}return copy(c);}
     if(action==='character/restore'){const c=character(w,a.id);c.deleted_at=null;return copy(c);}
     if(action==='character/purge'){

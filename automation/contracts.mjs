@@ -2,6 +2,11 @@ const number = (min,max,integer=false) => ({type:integer?'integer':'number',mini
 const text = {type:'string',minLength:1,maxLength:4096};
 const mode={type:'string',enum:['body','rightFoot','right_foot']};
 export const actions = {
+  'character/replace-reference':{tool:'sprited_replace_character_reference',description:'Replace one character reference atomically; preserve previous attempt snapshots.',properties:{id:text,path:text,name:text},required:['id','path','name']},
+  'connections/status':{tool:'sprited_get_connection_status',description:'Distinguish SPRITED server readiness from a live external MCP client. Does not certify generation capability.',properties:{}},
+  'connections/setup':{tool:'sprited_get_connection_setup',description:'Get this installation’s MCP entry point for manual setup.',properties:{}},
+  'connections/heartbeat':{tool:'sprited_agent_heartbeat',description:'Register a live agent session; expires after 90 seconds without a heartbeat.',properties:{session_id:text,agent:text},required:['session_id','agent']},
+  'connections/disconnect':{tool:'sprited_agent_disconnect',description:'Remove a disconnected agent session.',properties:{session_id:text},required:['session_id']},
   'character/create':{tool:'sprited_create_character',description:'Add a new persistent character with a managed reference.',properties:{path:text,name:text},required:['path','name']},
   'character/list':{tool:'sprited_list_characters',description:'List active characters.',properties:{}},
   'character/select':{tool:'sprited_get_character',description:'Select and get an active character.',properties:{id:text},required:['id']},
@@ -53,6 +58,7 @@ export const actions = {
   'status': {tool:'sprited_get_status',description:'Read the active project state and manifest.',properties:{}}
 };
 Object.assign(actions['animation/configure'].properties,{loop:{type:'boolean'},sampling:{type:'string',enum:['uniform','smart']}});
+for(const key of ['canvas_width','canvas_height','alignment','background_mode','background'])actions['spritesheet/create'].properties[key]=actions['animation/configure'].properties[key];
 export function validate(action,args) {
   if(!Object.hasOwn(actions,action))throw new Error('Unknown SPRITED operation');
   const spec=actions[action];

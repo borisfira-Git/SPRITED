@@ -18,7 +18,7 @@ try {
   if(options.api){
     const base=new URL(options.api);if(base.protocol!=='http:'||!['127.0.0.1','localhost'].includes(base.hostname)||base.username||base.password)throw Error('API must be a loopback HTTP address');
     const token=options.token||process.env.SPRITED_TOKEN;if(!token)throw Error('Set SPRITED_TOKEN for the running API');
-    service={close:async()=>{},call:async(action,args={})=>{const reads=['status','frames/get','character/show','character/list','character/trash','recipes/list','providers/list','router/status','diagnostics/status','animation/list','animation/status','jobs/list','jobs/get','attempts/list'];let endpoint=action;
+    service={close:async()=>{},call:async(action,args={})=>{const reads=['connections/status','connections/setup','status','frames/get','character/show','character/list','character/trash','recipes/list','providers/list','router/status','diagnostics/status','animation/list','animation/status','jobs/list','jobs/get','attempts/list'];let endpoint=action;
       if(action==='animation/status')endpoint='generation-runs/'+encodeURIComponent(args.id);
       if(action==='jobs/get')endpoint='generation-jobs/'+encodeURIComponent(args.id);
       const method=reads.includes(action)?'GET':'POST',url=new URL('/'+endpoint,base);if(method==='GET')for(const [key,value] of Object.entries(args))if(key!=='id')url.searchParams.set(key,String(value));const response=await fetch(url,{method,headers:{authorization:'Bearer '+token,'content-type':'application/json'},...(method==='POST'?{body:JSON.stringify(args)}:{})});return response.json();}};

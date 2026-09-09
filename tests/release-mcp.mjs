@@ -10,7 +10,7 @@ createInterface({input:child.stdout}).on('line',line=>{const m=JSON.parse(line);
 function request(method,params={}){return new Promise((resolve,reject)=>{const n=++id,t=setTimeout(()=>reject(new Error(stderr||'MCP timed out')),45000);pending.set(n,r=>{clearTimeout(t);pending.delete(n);resolve(r)});child.stdin.write(JSON.stringify({jsonrpc:'2.0',id:n,method,params})+'\n')});}
 const report=[];
 try {
-  assert.equal((await request('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'release-check',version:'1'}})).result.serverInfo.version,process.env.SPRITED_EXPECT_VERSION||'0.8.0-preview.1');
+  assert.equal((await request('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'release-check',version:'1'}})).result.serverInfo.version,process.env.SPRITED_EXPECT_VERSION||'0.8.0-preview.2');
   child.stdin.write(JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})+'\n');
   const steps=[
     ['sprited_open_project',{path:'walk.json'}],['sprited_import_video',{path:'walk.webm'}],

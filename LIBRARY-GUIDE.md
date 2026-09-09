@@ -1,4 +1,4 @@
-# SPRITED 0.8.0-preview.1 — Character Library
+# SPRITED 0.8.0-preview.2 — Character Library
 
 This extends the existing 0.7.0 desktop editor. It does not contain an AI animation generator.
 
@@ -18,15 +18,16 @@ Open the printed **Library** URL. Its fragment contains a local access token; th
 
 ## Normal workflow
 
-1. Click **Character Library**, expand **+ NEW CHARACTER**, enter a name and choose PNG/WebP. The reference is copied into managed storage.
-2. Choose the character and animation. Set duration (0.3–5 seconds), Loop and final count (2–24).
-3. Click **GENERATE**. This creates a persistent job for an external agent; it does not launch VS Code or invent a video.
-4. The agent lists, claims and executes the job using its available generation capabilities, then submits a local video. Use **Refresh** to receive updates in the UI.
-5. Select the attempt and **Preview video**. **APPROVE**, **REJECT** with a reason, or **REDO**. REDO queues a new variation request and preserves the previous attempt/video.
-6. Choose the sprite count and **CREATE SPRITESHEET**. The existing extraction, key-color cleanup, right-foot/body alignment, normalization and renderer run on that stored video. Repeat with 24 frames without another generation.
-7. PNG sheet and individual-frame download buttons appear under each saved sheet version. **OPEN IN ADVANCED EDITOR** loads the latest result for existing preview/edit/export controls.
+1. The connected library opens directly. Choose a character or click **+ NEW CHARACTER**, enter a name, browse/drop a PNG/WebP and click **CREATE CHARACTER**. Choosing a file alone does not create anything.
+2. Choose one of six animations. The saved reference stays visible; **Replace Reference** updates future attempts while existing attempts retain their reference snapshot.
+3. Click **GENERATE**. If no live external MCP client is connected, Connections opens and no job is created. A connected client permits a job; the agent still needs an available video generator and an instruction to process the queue.
+4. The UI checks status every four seconds and automatically loads submitted video. Select older attempts within the same animation using the history selector.
+5. **APPROVE**, **REJECT** (optional reason), or **REDO**. REDO preserves prior attempts and creates another request.
+6. **CREATE SPRITESHEET** defaults to 8 frames for every recipe. Choose 4, 6, 8, 12, 16 or 24; changing count reuses the video. **EXPORT PNG** downloads the selected sheet.
+7. **More Export Options** contains saved versions, individual frames, JSON, project, Godot files and **Open in Advanced Editor**. Duration, loop, sampling, alignment, canvas, key/background and diagnostics are under **Advanced Options**.
+8. **Settings → Connections** distinguishes server readiness from a live MCP client. See **CONNECTIONS-SETUP.md** for manual Cline/Codex setup; no user settings were changed by this task.
 
-The legacy run panel still exposes canvas, key color and alignment settings. In the connected library those processing settings can currently be changed through `animation configure` / its MCP equivalent. The normal library UI uses stored defaults (256×256, green key removal, recipe alignment).
+AUTO sampling currently uses Uniform. SMART remains an explicit Uniform fallback. Approval is preserved when deriving another sheet from the same video. Sheet preview is static; the video and advanced editor provide animation playback. Character menu contains Trash, Restore and confirmed Permanent Delete.
 
 ## CLI (actual command names)
 
@@ -109,7 +110,7 @@ Project version remains 1 with an optional `workflow` extension (schema version 
 
 **WORKING:** persistent multiple characters, references, six recipes, phase descriptions, queue/claim/release/fail, local video submission, separate attempt history, REDO requests, approval/rejection memory, connected video preview, same-video 8/24 extraction, PNG sheets/frames, advanced editor handoff, Trash/restore/permanent deletion, CLI/API/MCP. Existing Godot export remains available.
 
-**PARTIAL:** templates specify ordered motion phases and constraints, not executable pose trajectories. Memory pre-fills approved settings and records provider metadata; it is not training or a calibrated provider-ranking system. Editor corrections are not automatically synchronized back into saved library attempts. UI refresh is manual. GUI advanced settings and per-animation grouping need refinement. Job processing progress is currently synchronous; only final process state is durably committed.
+**PARTIAL:** templates specify ordered motion phases and constraints, not executable pose trajectories. Memory pre-fills approved settings and records provider metadata; it is not training or a calibrated provider-ranking system. Editor corrections are not automatically synchronized back into saved library attempts. UI refresh polls every four seconds. The React UI remains separate from this connected desktop library. Job processing progress is currently synchronous; only final process state is durably committed.
 
 **PLACEHOLDER:** LocalAnimationProvider and StubProvider fail explicitly. AgentRoutedProvider queues work; it does not create video.
 

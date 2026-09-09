@@ -5,6 +5,7 @@ import {randomUUID} from 'node:crypto';
 import {existsSync} from 'node:fs';
 import {validate} from './contracts.mjs';
 import {diagnostics} from './diagnostics.mjs';
+import {Connections} from './connections.mjs';
 const appRoot=fileURLToPath(new URL('../',import.meta.url));
 export const envelope=(result={},warnings=[],output_paths=[])=>({success:true,status:'ok',result,warnings,errors:[],output_paths,next_suggested_action:null});
 export const failure=error=>({success:false,status:'failed',result:null,warnings:[],errors:[error.message||String(error)],output_paths:[],next_suggested_action:null});
@@ -93,7 +94,9 @@ export class Service {
   async execute(action,args){
     let before,oldManifest,oldVideo;
     try {
-      validate(action,args);before=await this.core('snapshot');oldManifest=structuredClone(this.manifest);oldVideo=this.videoPath;
+      validate(action,args);
+      if(action.startsWith('connections/')){this.connections ||= new Connections();if(action==='connections/setup')return envelope({command:process.execPath,cli_path:path.join(appRoot,'automation','cli.mjs'),transport:'stdio via authenticated localhost API',instructions:'Start this library, configure the MCP client manually, then return and press TEST CONNECTION. A connection does not verify a generation tool.'});return envelope(this.connections[action.split('/')[1]](args));}
+      before=await this.core('snapshot');oldManifest=structuredClone(this.manifest);oldVideo=this.videoPath;
       let result,outputs=[];
       const mode=(args.mode||this.manifest.alignment)==='right_foot'?'rightFoot':args.mode||this.manifest.alignment;
       if(action==='diagnostics/status')return envelope(await diagnostics(this.root));
@@ -113,7 +116,8 @@ export class Service {
       if(action==='spritesheet/create'){
         const run=await this.core('workflow/animation/status',{id:args.id});if(!run.source_video_path)throw Error('Receive a video result first');
         this.videoPath=await this.input(run.source_video_path,['.mp4','.webm','.mov'],250*1024*1024);
-        await this.core('workflow/animation/configure',{id:args.id,output_frames:args.frames,source_frames:Math.max(run.options.source_frames,args.frames),sampling:args.sampling||'uniform'});
+        const processing={};for(const key of ['canvas_width','canvas_height','alignment','background_mode','background'])if(key in args)processing[key]=args[key];
+        await this.core('workflow/animation/configure',{id:args.id,output_frames:args.frames,source_frames:Math.max(run.options.source_frames,args.frames),sampling:args.sampling||'uniform',...processing});
         const processed=await this.core('workflow/animation/process',{id:args.id,url:'http://sprited.local/source-video?'+randomUUID(),exact_output:true});
         if(processed.status==='failed')throw Error(processed.errors.join('; '));
         const processedState=await this.core('snapshot');
@@ -139,7 +143,7 @@ export class Service {
       if(action.startsWith('character/')||action.startsWith('jobs/')||action.startsWith('attempts/')||['recipes/list','providers/list','router/status','animation/create','animation/list','animation/status','animation/configure','animation/attach-video','animation/route','animation/submit-result','animation/process','animation/open','animation/approve','animation/reject','animation/regenerate'].includes(action)){
         const internal={...args};
         let operation=action;
-        if(['character/set-reference','character/create'].includes(action)){
+        if(['character/set-reference','character/create','character/replace-reference'].includes(action)){
           const file=await this.input(args.path,['.png','.webp'],9*1024*1024),bytes=await readFile(file);
           internal.src=`data:image/${path.extname(file).slice(1).toLowerCase()};base64,${bytes.toString('base64')}`;
           const dir=await this.directory('.sprited/references');internal.path=path.relative(this.root,path.join(dir,randomUUID()+path.extname(file).toLowerCase()));
@@ -168,7 +172,7 @@ export class Service {
           if(run.source_mode==='manual_video'&&run.source_video_path){this.videoPath=await this.input(run.source_video_path,['.mp4','.webm','.mov'],250*1024*1024);internal.url='http://sprited.local/source-video?'+randomUUID();}
         }
         result=await this.core('workflow/'+operation,internal);
-        if(['character/set-reference','character/create'].includes(action))await writeFile(path.join(this.root,internal.path),Buffer.from(internal.src.split(',')[1],'base64'),{flag:'wx'});
+        if(['character/set-reference','character/create','character/replace-reference'].includes(action))await writeFile(path.join(this.root,internal.path),Buffer.from(internal.src.split(',')[1],'base64'),{flag:'wx'});
         if(['jobs/create','attempts/redo'].includes(action)){const dir=await this.directory(result.output_directory);await writeFile(path.join(dir,'job.json'),JSON.stringify(result,null,2),{flag:'wx'});}
         if(action.startsWith('jobs/')||action==='attempts/redo'){
           const withWorkspace=j=>({...j,workspace_root:this.root});result=Array.isArray(result)?result.map(withWorkspace):withWorkspace(result);

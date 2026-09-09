@@ -10,14 +10,27 @@ function Get-LibraryUrl {
   }
 }
 $existingUrl = Get-LibraryUrl
+$liveServer = $false
 if ($existingUrl) {
   try {
     $parts = $existingUrl.Split('#')
     $statusUrl = $parts[0].Replace('/ui/', '/status')
     $null = Invoke-RestMethod -Uri $statusUrl -Headers @{ Authorization = ('Bearer ' + $parts[1]) } -TimeoutSec 2
-    Start-Process $existingUrl
-    exit
+    $liveServer = $true
   } catch { }
+}
+if ($liveServer) {
+  $sameRelease = $false
+  try {
+    $setupUrl = $parts[0].Replace('/ui/', '/connections/setup')
+    $setup = Invoke-RestMethod -Uri $setupUrl -Headers @{ Authorization = ('Bearer ' + $parts[1]) } -TimeoutSec 2
+    $sameRelease = [IO.Path]::GetFullPath($setup.result.cli_path) -eq [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'cli.mjs'))
+  } catch { }
+  if (-not $sameRelease) {
+    throw 'An older or different SPRITED Library server is still running. Restart Windows, then open SPRITED-Library.cmd from this release. Your saved library stays in place. See CONNECTIONS-SETUP.md.'
+  }
+  Start-Process $existingUrl
+  exit
 }
 $node = (Get-Command node -ErrorAction Stop).Source
 $cli = Join-Path $PSScriptRoot 'cli.mjs'

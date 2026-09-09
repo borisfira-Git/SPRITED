@@ -17,7 +17,7 @@ $assets = @{
 foreach($entry in $assets.GetEnumerator()) { Copy-Item -LiteralPath (Join-Path $sourceRoot $entry.Key) -Destination (Join-Path $releaseRoot ('app/' + $entry.Value)) }
 Get-ChildItem -LiteralPath (Join-Path $sourceRoot 'automation') -File | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $releaseRoot 'automation') }
 Copy-Item -LiteralPath $PlaywrightCore -Destination (Join-Path $releaseRoot 'automation/node_modules/playwright-core') -Recurse
-foreach($name in @('CHECKPOINT.md','AUDIT-AND-PLAN.md','CHANGELOG.md','VERSION')) { Copy-Item -LiteralPath (Join-Path $sourceRoot $name) -Destination $releaseRoot }
+foreach($name in @('CHECKPOINT.md','AUDIT-AND-PLAN.md','CHANGELOG.md','CONNECTIONS-SETUP.md','VERSION')) { Copy-Item -LiteralPath (Join-Path $sourceRoot $name) -Destination $releaseRoot }
 Copy-Item -LiteralPath (Join-Path $sourceRoot 'desktop/SPRITED-Library.cmd') -Destination $releaseRoot
 Copy-Item -LiteralPath (Join-Path $sourceRoot 'LIBRARY-GUIDE.md') -Destination $releaseRoot
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'

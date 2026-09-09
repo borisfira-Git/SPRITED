@@ -1,7 +1,9 @@
 import {createInterface} from 'node:readline';
 import {actions,tools} from './contracts.mjs';
+import {randomUUID} from 'node:crypto';
 export function startMcp(service) {
   const input=createInterface({input:process.stdin,crlfDelay:Infinity});let initialized=false,queue=Promise.resolve();
+  const session_id=randomUUID();let heartbeatTimer;
   const send=(id,result,error)=>process.stdout.write(JSON.stringify(error?{jsonrpc:'2.0',id,error}:{jsonrpc:'2.0',id,result})+'\n');
   async function handle(line){
     let message;
@@ -11,7 +13,10 @@ export function startMcp(service) {
     if(message.jsonrpc!=='2.0'||typeof method!=='string'){send(id,null,{code:-32600,message:'Invalid request'});return;}
     try {
       if(method==='initialize'){
-        initialized=true;send(id,{protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'sprited',version:'0.8.0-preview.1'}});
+        const agent=String(params?.clientInfo?.name||'MCP client').slice(0,120);
+        await service.call('connections/heartbeat',{session_id,agent});clearInterval(heartbeatTimer);
+        heartbeatTimer=setInterval(()=>{service.call('connections/heartbeat',{session_id,agent}).catch(()=>{});},30000);heartbeatTimer.unref();
+        initialized=true;send(id,{protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'sprited',version:'0.8.0-preview.2'}});
       } else if(method==='ping')send(id,{});
       else if(!initialized)send(id,null,{code:-32002,message:'Initialize first'});
       else if(method==='tools/list')send(id,{tools});
@@ -24,5 +29,5 @@ export function startMcp(service) {
     }catch(error){send(id,null,{code:-32603,message:error.message});}
   }
   input.on('line',line=>{queue=queue.then(()=>handle(line));});
-  input.on('close',()=>{queue.then(()=>service.close()).catch(error=>console.error(error.message));});
+  input.on('close',()=>{clearInterval(heartbeatTimer);queue.then(async()=>{await service.call('connections/disconnect',{session_id});await service.close();}).catch(error=>console.error(error.message));});
 }

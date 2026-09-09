@@ -1,3 +1,11 @@
+## 0.8.0-preview.2 — 2026-09-09
+
+- Simplified connected character workspace, minimal explicit creation and reference replacement, animation-scoped history, automatic status/video updates, obvious PNG export and collapsed advanced controls.
+- Added Settings/Connections with live MCP sessions, 90-second heartbeat expiry, independent server readiness and copyable Cline JSON/Codex TOML. No actual user extension configuration or real generation test.
+- Preserved video approval during independent sheet derivation; exposed existing processing options through the shared sheet service. Default final count is eight for all new recipes.
+- Added connection/UX tests and retained library/core/API/MCP regression coverage. Old standalone editor and processing engine remain in place.
+- Library launcher refuses to silently reuse a server from another release; restarting Windows closes an old background instance without deleting saved data.
+
 # SPRITED version history
 
 ## 0.7.0 — local video and automation MVP
