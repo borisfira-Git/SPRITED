@@ -6,6 +6,7 @@
   const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const images = new Map();
   const state = {
+    workflow: SpritedWorkflow.empty(),
     projectName: "Untitled Animation", frames: [], selectedId: null, selectedIds: [], selectionAnchorId: null, referenceId: null,
     canvasWidth: 512, canvasHeight: 512, groundRatio: .88, anchorRatio: .5, targetHeightRatio: .72, rulerBottomRatio: .88, fps: 12, loop: true,
     playing: false, zoom: 1, tool: "move", grid: true, ground: true, guides: true, bounds: true, bodyDebug: false, alignmentMode: "body",
@@ -32,7 +33,7 @@
   function reference() { return state.frames.find((f) => f.id === state.referenceId) || null; }
   function snapshot() {
     return {
-      version: 1, projectName: state.projectName,
+      version: 1, workflow: structuredClone(state.workflow), projectName: state.projectName,
       frames: state.frames.map((f) => ({ ...f, charBounds: { ...f.charBounds }, alphaBounds: { ...f.alphaBounds }, bodyBounds: f.bodyBounds ? { ...f.bodyBounds } : undefined })),
       selectedId: state.selectedId, selectedIds: [...state.selectedIds], selectionAnchorId: state.selectionAnchorId,
       referenceId: state.referenceId, canvasWidth: state.canvasWidth,
@@ -41,7 +42,9 @@
     };
   }
   function restore(data) {
+    const workflow=SpritedWorkflow.hydrate(data.workflow);
     stop(); Object.assign(state, data, {
+      workflow,
       frames: (data.frames || []).map((f)=>({
         ...f,
         manualOffsetX:Number.isFinite(f.manualOffsetX)?f.manualOffsetX:0,
@@ -1013,6 +1016,7 @@
   window.SpritedCore = {
     async dispatch(operation, args = {}) {
       stop();
+      if(operation.startsWith('workflow/'))return workflowAction(operation.slice(9),args);
       switch (operation) {
         case "snapshot": return snapshot();
         case "open": {
@@ -1057,5 +1061,87 @@
       }
     }
   };
+  function editorSnapshot(){const s=snapshot();delete s.workflow;return s;}
+  async function workflowAction(action,args){
+    const W=SpritedWorkflow,w=state.workflow;
+    const result=r=>structuredClone(r);
+    if(['character/create','character/list','character/select','character/trash','character/delete','character/restore','character/purge','jobs/create','jobs/list','jobs/get','jobs/claim','jobs/release','jobs/fail','jobs/submit-result','attempts/list','attempts/redo','attempts/reject'].includes(action)){
+      if(action==='character/create'){W.image(args.src);const img=await loadImage(args.src);if(img.naturalWidth*img.naturalHeight>4*1024*1024)throw Error('Reference exceeds 4 megapixels');}
+      const next=structuredClone(w),output=W.library(next,action,args);state.workflow=next;if(action==='character/purge'){state.history=[];state.future=[];updateHistory();}return output;
+    }
+    if(action==='character/show')return result(w.character_profile);
+    if(action==='recipes/list')return W.recipes();
+    if(action==='providers/list')return W.listProviders();
+    if(action==='router/status')return {mode:w.router_mode||'auto',providers:W.listProviders(),agent_connected:'unknown'};
+    if(action==='character/set-reference'){
+      W.image(args.src);const image=await loadImage(args.src);if(image.naturalWidth*image.naturalHeight>4*1024*1024)throw Error('Reference exceeds 4 megapixels');
+      commit();return W.setReference(w,args);
+    }
+    if(action==='animation/list')return result(w.animation_runs.map(({editor_snapshot,...r})=>r));
+    if(action==='animation/create') {commit();return W.create(w,args.animation_type);}
+    const r=W.get(w,args.id);
+    if(r.job_id&&['animation/attach-video','animation/submit-result'].includes(action))throw Error('Use jobs/submit-result and an active claim token for a queued job');
+    if(action==='animation/status')return result({...r,editor_snapshot:undefined});
+    if(action==='animation/configure'){const {id,...options}=args;const test=structuredClone(w);W.configure(test,id,options);commit();return W.configure(w,id,options);}
+    if(action==='animation/attach-video'){commit();return W.attach(w,args.id,args.path);}
+    if(action==='animation/submit-result'){
+      if(r.status!=='queued')throw Error('Results can only be submitted to a queued run');
+      commit();W.attach(w,args.id,args.path);r.selected_provider=args.provider;r.provider_metadata={provider_name:args.provider,submitted_at:new Date().toISOString(),origin:'external_agent',verified_generation:false};return result(r);
+    }
+    if(action==='animation/record-export'){r.sprite_sheet_path=args.paths.find(p=>p.endsWith('spritesheet.png'))||null;r.godot_export_path=args.paths.find(p=>p.endsWith('animation.tres'))||null;r.status='exported';r.updated_at=new Date().toISOString();return result({...r,editor_snapshot:undefined});}
+    if(action==='animation/record-sheet'){r.spritesheets ||= [];r.spritesheets.push({id:args.sheet_id,frame_count:args.frames,sampling:args.sampling,output_paths:args.paths,created_at:new Date().toISOString(),warnings:r.warnings});r.sprite_sheet_path=args.paths.find(p=>p.endsWith('spritesheet.png'));r.user_approved=args.approved;r.approval_state=args.approval_state;r.status=args.approved?'approved':'validated';return result({...r,editor_snapshot:undefined});}
+    if(action==='animation/route'){commit();return W.route(w,args.id,args.provider||'auto');}
+    if(action==='animation/reject'){commit();return W.reject(w,args.id);}
+    if(action==='animation/regenerate'){commit();return W.regenerate(w,args.id);}
+    if(action==='animation/approve'){const test=structuredClone(w);W.approve(test,args.id);commit();r.approval_state='approved';return W.approve(w,args.id);}
+    if(action==='animation/open'){
+      if(!r.editor_snapshot)throw Error('Process the run before opening its frames');
+      commit();await window.SpritedCore.dispatch('open',{project:{...r.editor_snapshot,workflow:w}});return {opened:r.id,frame_count:state.frames.length};
+    }
+    if(action==='animation/process'){
+      const previous=editorSnapshot(),history=state.history.slice(),future=state.future.slice();
+      let run=r;
+      try {
+        const source=await W.generate({...run,character_reference:run.character_reference,recipe:run.recipe_snapshot,motion_template:run.recipe_snapshot.motion_template});
+        if(source.pending){run.status='queued';run.provider_metadata=source.metadata;return result({...run,editor_snapshot:undefined});}
+        if(!args.url)throw Error('Reattach the local video to process this run');
+        run.status='extracting';run.user_approved=false;run.approval_state='pending';run.errors=[];
+        const o=run.options;
+        restore({...previous,frames:[],selectedId:null,selectedIds:[],referenceId:null,projectName:run.character_reference.name+'_'+run.animation_type.toLowerCase(),canvasWidth:o.canvas_width,canvasHeight:o.canvas_height,loop:o.loop??run.recipe_snapshot.loop,alignmentMode:o.alignment,workflow:w});
+        run=W.get(state.workflow,args.id);
+        await window.SpritedCore.dispatch('extract',{url:args.url,name:run.source_video_path,start:o.start,end:o.end,count:args.exact_output?o.output_frames:o.source_frames,maxSize:512});
+        const all=state.frames.slice(),n=o.output_frames;
+        const indices=Array.from({length:n},(_,i)=>n===1?0:state.loop?Math.floor(i*all.length/n):Math.round(i*(all.length-1)/(n-1)));
+        state.frames=indices.map((index,i)=>({...all[index],duration:all.slice(index,indices[i+1]??all.length).reduce((sum,f)=>sum+f.duration,0)}));
+        state.selectedId=state.referenceId=state.frames[0].id;state.selectedIds=state.frames.map(f=>f.id);
+        run.source_frame_count=all.length;run.extracted_frames_paths=[];
+        run.frame_selection={method:'uniform_temporal',selected_indices:indices,source_count:all.length,output_count:n,source_frames_retained:false};
+        run.status='processing';
+        if(o.background_mode==='key')await window.SpritedCore.dispatch('remove-background',{color:o.background,tolerance:52,softness:12});
+        await window.SpritedCore.dispatch('align',{mode:o.alignment});await window.SpritedCore.dispatch('normalize',{mode:o.alignment});
+        run.status='validating';run.validation=await window.SpritedCore.dispatch('validate');
+        const unique=new Set(state.frames.map(f=>f.src)).size;
+        run.validation.duplicate_fraction=1-unique/state.frames.length;
+        run.validation.max_baseline_drift_px=Math.max(0,...run.validation.frames.map(f=>Math.abs(f.baseline_delta)));
+        const scales=run.validation.frames.map(f=>f.scale);run.validation.scale_range=Math.max(...scales)-Math.min(...scales);
+        const pixels=[];
+        for(const f of state.frames){const small=document.createElement('canvas');small.width=small.height=32;const c=small.getContext('2d',{willReadFrequently:true});c.drawImage(await renderedFrame(f),0,0,32,32);pixels.push(c.getImageData(0,0,32,32).data);}
+        const diff=(a,b)=>a.reduce((sum,v,i)=>sum+Math.abs(v-b[i]),0)/(a.length*255);
+        const movement=pixels.slice(1).map((p,i)=>diff(pixels[i],p));
+        run.validation.mean_frame_difference=movement.reduce((a,b)=>a+b,0)/Math.max(1,movement.length);
+        run.validation.loop_closure_difference=run.recipe_snapshot.loop?diff(pixels[0],pixels.at(-1)):null;
+        run.validation.metric_notes='Pixel differences are normalized 0..1; no calibrated quality threshold and no gait/identity verdict.';
+        run.validation.semantic_checks='Not implemented: anatomy, face/equipment identity, gait alternation and motion phases need visual review.';
+        run.warnings=[...run.validation.warnings];if(unique<state.frames.length)run.warnings.push('Exact duplicate frames detected');
+        if(o.sampling==='smart')run.warnings.push('SMART analysis is not implemented; fell back to deterministic UNIFORM sampling. Gait phase coverage is not verified.');
+        if(run.validation.mean_frame_difference<.001)run.warnings.push('Very little visible motion; inspect the animation before approval');
+        run.editor_snapshot=editorSnapshot();run.output_frames_paths=state.frames.map((_,i)=>`embedded:output/${i}`);
+        run.sprite_sheet_path=null;run.godot_export_path=null;run.status='validated';run.updated_at=new Date().toISOString();
+        return result({...run,editor_snapshot:undefined});
+      }catch(error){run.status='failed';run.user_approved=false;run.errors=[error.message||String(error)];run.updated_at=new Date().toISOString();return result({...run,editor_snapshot:undefined});}
+      finally {const updated=state.workflow;restore({...previous,workflow:updated});state.history=history;state.future=future;updateHistory();}
+    }
+    throw Error('Unknown workflow action');
+  }
   bind(); loadDefaultExportDirectory(); syncInputs(); renderAll();
 })();

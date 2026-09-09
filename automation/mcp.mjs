@@ -11,7 +11,7 @@ export function startMcp(service) {
     if(message.jsonrpc!=='2.0'||typeof method!=='string'){send(id,null,{code:-32600,message:'Invalid request'});return;}
     try {
       if(method==='initialize'){
-        initialized=true;send(id,{protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'sprited',version:'0.7.0'}});
+        initialized=true;send(id,{protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'sprited',version:'0.8.0-preview.1'}});
       } else if(method==='ping')send(id,{});
       else if(!initialized)send(id,null,{code:-32002,message:'Initialize first'});
       else if(method==='tools/list')send(id,{tools});

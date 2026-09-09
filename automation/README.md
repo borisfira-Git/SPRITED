@@ -1,4 +1,8 @@
-# SPRITED automation 0.7.0 (local MVP)
+# SPRITED automation 0.8.0-preview.1
+
+The new connected Character Library, job queue and 49-tool MCP workflow are documented in `../LIBRARY-GUIDE.md`. Use `mcp --api http://127.0.0.1:47821` with `SPRITED_TOKEN` when the library GUI/server already owns the workspace. The new `/ui/` interface shares the server library; the standalone editor below remains independent. No AI generator is included.
+
+## Original 0.7.0 processing commands (retained)
 
 Requires Windows, Microsoft Edge and Node.js 22 or newer. The portable distribution includes `playwright-core`; when running from source, run `npm install` in this directory. There are no AI API calls, paid services or uploads.
 

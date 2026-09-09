@@ -36,7 +36,7 @@ try {
   await page.locator('dialog input[name=end]').fill('2');
   await page.locator('dialog input[name=count]').fill('8');
   await page.locator('dialog button[name=import]').click();
-  await page.waitForFunction(()=>!document.querySelector('dialog'));
+  await page.waitForFunction(()=>!document.querySelector('.video-import-dialog'));
   const original=await saveProject();assert.equal(original.frames.length,8);
   assert.equal(original.frames[0].duration,250);
   assert.equal(original.fps,4);

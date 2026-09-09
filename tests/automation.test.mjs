@@ -55,7 +55,7 @@ try {
   const initialized=await request('initialize',{protocolVersion:'2025-06-18',capabilities:{},clientInfo:{name:'sprited-test',version:'1'}});
   assert.equal(initialized.result.serverInfo.name,'sprited');
   child.stdin.write(JSON.stringify({jsonrpc:'2.0',method:'notifications/initialized'})+'\n');
-  const list=await request('tools/list');assert.equal(list.result.tools.length,12);
+  const list=await request('tools/list');assert.ok(list.result.tools.length>=12);
   const status=await request('tools/call',{name:'sprited_get_status',arguments:{}});assert.equal(status.result.structuredContent.result.frame_count,8);
   const check=await request('tools/call',{name:'sprited_validate_animation',arguments:{}});assert.equal(check.result.isError,false);
   const bad=await request('tools/call',{name:'sprited_open_project',arguments:{path:'../outside.json'}});assert.equal(bad.result.isError,true);

@@ -1,4 +1,49 @@
-# Checkpoint — SPRITED 0.7.0 local MVP
+# Current checkpoint — SPRITED 0.8.0-preview.1
+
+Updated 2026-09-09. Continue this existing clone. The latest user specification is the persistent Character Animation Library / external-agent job queue, not installing a local AI model. See `LIBRARY-GUIDE.md` for exact usage and honest feature status. Original 0.7.0 history is retained below.
+
+## Current implementation
+
+- Shared `public/character-workflow.js`: character library/reference snapshots, six recipes and phase templates, attempts, approved-setting memory, durable jobs, atomic claims/release/failure/submission, REDO variation requests, logical Trash/restore/purge.
+- `static/app.js`: optional workflow project extension, shared-core dispatch, isolated per-run video processing, loop-safe uniform sampling, geometry/pixel metrics, editor handoff and sheet records. Existing image-processing algorithms were reused.
+- `automation/service.mjs`: managed reference/video copies, durable session, scoped job output folders, separate 8–24 frame sheet derivations and PNG frame export, managed deletion, existing PNG/Godot pipeline.
+- `automation/contracts.mjs`, `cli.mjs`, `http.mjs`, `mcp.mjs`: 49 tools; authenticated connected GUI and API; MCP/CLI can proxy to the already-running server without competing for the workspace lock.
+- `public/library-panel.js`: connected multi-character/video-first UI. `public/character-panel.js`: earlier single-project run panel retained. `app/Sprited.tsx` only preserves metadata; no new React library UI.
+- `automation/Open-Library.ps1` / `desktop/SPRITED-Library.cmd`: local library launcher with persistent `%LOCALAPPDATA%/SPRITED` storage. Existing `SPRITED.exe` remains standalone editor.
+
+## Tests / state
+
+Source library integration passed: restart persistence, two characters, claim collision/release, token rejection, copied result, video before extraction, REDO, approve, same-video 8/24 versions, connected video preview/editor handoff, real MCP-over-HTTP proxy. Synthetic fixture only, never a real generation claim.
+
+Original automation and browser video regression suites passed, including PNG/Godot exports and rollback/path/auth checks. Static build and focused React TypeScript check passed. `video-browser.mjs` selector was narrowed to its own video dialog because the new library dialogs persist in the DOM. Packaged library integration also passed: the actual release service, HTTP, MCP proxy, GUI/video/editor, persistence, 8/24 outputs and permanent-delete confirmation/removal. Godot 4.5.1 loaded the packaged 8-frame atlas at 256×256 with duration 1.5 seconds (an unrelated root certificate warning was emitted). Logs live in the task's `work/` folder and a copied report is delivered under `outputs/`.
+
+No real Guardian asset or actual external generator was executed. Local generation remains unconfigured; no model downloads occurred. Test workspaces contain synthetic jobs/attempts and must not be presented as production character content.
+
+## Remaining milestone / exact continuation
+
+1. Packaged tests are complete. Retain `tests/library.test.mjs` as the regression entry point; use `SPRITED_SERVICE_MODULE`, `SPRITED_HTTP_MODULE`, `SPRITED_CLI` for packaged entry points when new changes justify rerunning it.
+2. Add a temporal frame-sequence submission contract and video preview equivalent. Current submission is video-only.
+3. Improve the library screen: animation grouping, processing settings, automatic status refresh and explicit synchronization of advanced-editor corrections to a sheet version.
+4. Add a calibrated motion-aware selector and real pose trajectories. SMART currently reports Uniform fallback; semantic gait/identity checks are unimplemented. Do not label geometry validation as good walking.
+5. Exercise a real external agent/provider on an actual Guardian reference. Agent must claim a job, genuinely generate video, submit it, and have the user inspect it before approval. Do not fabricate completion with the synthetic test fixture.
+6. Add explicit per-library/project switching so opening an unrelated old project cannot unintentionally replace the workspace library. Current service project/open deliberately replaces current state; use separate workspaces.
+
+Claims do not auto-expire. Keep the claim token and release it on cancellation; server restart preserves claims. Trash cancels pending jobs but restore does not restart them. Models/providers remain swappable, but AUTO currently means agent queue unless using the legacy manual-video route.
+
+Continuation test command from the source directory (set fresh workspace per test):
+
+```powershell
+$env:SPRITED_PLAYWRIGHT='C:/Users/User/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright-core/index.mjs'
+$env:SPRITED_TEST_WORKSPACE='../library-next-test'
+$env:SPRITED_TEST_VIDEO='../test-results-final/motion-fixture.webm'
+node tests/library.test.mjs
+```
+
+Changed/added files are the models/panels, static core/HTML, React metadata preservation, automation adapters/diagnostics/launcher, desktop launcher/version, build/preview/package scripts, tests, this checkpoint, guide and changelog. No existing source project was replaced.
+
+---
+
+# Historical checkpoint — SPRITED 0.7.0 local MVP
 
 Updated 2026-09-09. Continue in this existing Git clone, not a new scaffold.
 

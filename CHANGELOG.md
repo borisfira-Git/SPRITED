@@ -107,3 +107,10 @@
 ## 0.1.0
 
 - Initial sprite-sheet editor, preview and export application.
+# 0.8.0-preview.1 — persistent character library and agent jobs
+
+- Added character references, six recipes, phase templates, attempts and approved-setting memory.
+- Added durable external-agent queue with exclusive claims, result submission, release/failure and REDO.
+- Added connected video-first library UI; separate repeatable sheet/individual PNG derivation from one stored video.
+- Added managed Trash/restore/permanent deletion, scoped assets, MCP/API/CLI access and a Windows library launcher.
+- Reused existing processing/export functions; old projects still open. No real AI generation or motion-aware SMART selection is claimed.

@@ -46,6 +46,7 @@ type Frame = {
 };
 type ProjectData = {
   version: 1;
+  workflow?: unknown;
   projectName: string;
   frames: Frame[];
   selectedId: string | null;
@@ -426,6 +427,8 @@ export default function Sprited() {
   const framesInput = useRef<HTMLInputElement>(null);
   const projectInput = useRef<HTMLInputElement>(null);
   const exportDirectory = useRef<WritableDirectoryHandle | null>(null);
+  // Preserve the additive desktop workflow metadata when this editor saves a project.
+  const characterWorkflow = useRef<unknown>(undefined);
   const keysDown = useRef(new Set<string>());
   const scaleWheelTimer = useRef<number | null>(null);
   const scaleWheelHistoryOpen = useRef(false);
@@ -457,6 +460,7 @@ export default function Sprited() {
   const snapshot = useCallback(
     (): Snapshot => ({
       version: 1,
+      workflow: characterWorkflow.current,
       projectName,
       frames: frames.map((frame) => ({
         ...frame,
@@ -479,6 +483,7 @@ export default function Sprited() {
   );
 
   const restore = useCallback((data: Snapshot) => {
+    characterWorkflow.current = data.workflow;
     setPlaying(false);
     setProjectName(data.projectName || "Untitled Animation");
     setFrames((data.frames || []).map((frame) => ({
@@ -1519,6 +1524,7 @@ export default function Sprited() {
   function newProject() {
     if (frames.length && !window.confirm("Start a new project? Unsaved work will be cleared.")) return;
     setProjectName("Untitled Animation");
+    characterWorkflow.current = undefined;
     setFrames([]);
     setSelectedId(null);
     setSelectedIds([]);
