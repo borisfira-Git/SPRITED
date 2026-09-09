@@ -54,6 +54,8 @@
       if(!recipes.some(p=>p.animation_type===r.animation_type))throw Error('Unknown animation recipe');
       if(r.editor_snapshot?.workflow)throw Error('Recursive run snapshot');
       if(r.editor_snapshot?.frames?.some(f=>typeof f.src!=='string'||!/^data:image\/(png|webp);base64,[A-Za-z0-9+/=]+$/.test(f.src)))throw Error('Run frames must be embedded images');
+      r.frame_records ||= [];if(!Array.isArray(r.frame_records)||r.frame_records.length>24)throw Error('Invalid stored frame records');
+      const frameIds=new Set(),indexes=new Set();for(const f of r.frame_records){if(typeof f.frame_id!=='string'||!f.frame_id.length||frameIds.has(f.frame_id)||!Number.isInteger(f.frame_index)||f.frame_index<0||f.frame_index>23||indexes.has(f.frame_index)||f.character_id!==r.character_profile_id||f.animation_id!==r.id||!['png','webp'].includes(f.format)||![f.width,f.height].every(n=>Number.isInteger(n)&&n>0)||typeof f.created_at!=='string'||typeof f.storage_path!=='string')throw Error('Invalid stored frame record');frameIds.add(f.frame_id);indexes.add(f.frame_index);}
       if(r.editor_snapshot){
         const s=r.editor_snapshot;if(![s.canvasWidth,s.canvasHeight].every(n=>Number.isInteger(n)&&n>=16&&n<=4096)||!Array.isArray(s.frames)||s.frames.length>120)throw Error('Invalid stored run canvas or frame count');
         let pixels=0;for(const f of s.frames){if(!['x','y','scale','rotation','duration','sourceWidth','sourceHeight'].every(k=>Number.isFinite(f[k])&&Math.abs(f[k])<=1e6)||f.scale<=0||f.duration<=0||f.sourceWidth<=0||f.sourceHeight<=0)throw Error('Invalid stored frame geometry');for(const key of ['charBounds','alphaBounds'])if(!f[key]||!['x','y','w','h'].every(k=>Number.isFinite(f[key][k])))throw Error('Invalid stored frame bounds');pixels+=f.sourceWidth*f.sourceHeight;}if(pixels>32*1024*1024)throw Error('Stored run exceeds pixel budget');
@@ -78,7 +80,7 @@
     if(w.animation_runs.length>=50)throw Error('Maximum 50 animation runs per project');
     const recipe=recipes.find(r=>r.animation_type===type);if(!recipe)throw Error('Unknown animation type');
     const c=w.character_profile,key=c.id+':'+type,memory=Object.hasOwn(w.animation_memory,key)?w.animation_memory[key]:null;
-    const run={id:id(),character_profile_id:c.id,character_reference:copy(c),animation_type:type,recipe_id:recipe.id,recipe_snapshot:copy(recipe),status:'draft',source_mode:'direct_frames',source_video_path:null,source_frame_paths:[],
+    const run={id:id(),character_profile_id:c.id,character_reference:copy(c),animation_type:type,recipe_id:recipe.id,recipe_snapshot:copy(recipe),status:'draft',source_mode:'direct_frames',source_video_path:null,source_frame_paths:[],frame_records:[],
       extracted_frames_paths:[],output_frames_paths:[],sprite_sheet_path:null,godot_export_path:null,created_at:now(),updated_at:now(),warnings:[],errors:[],user_approved:false,
       router_mode:w.router_mode||'auto',selected_provider:null,provider_metadata:{},approval_state:'pending',
       options:settings({source_frames:recipe.default_source_frame_count,output_frames:recipe.default_output_frame_count,canvas_width:c.preferred_canvas_width,canvas_height:c.preferred_canvas_height,alignment:recipe.default_alignment_mode,background_mode:c.default_background_mode,background:'#00ff00',start:0,end:recipe.target_duration,loop:recipe.loop,sampling:'uniform',cols:recipe.recommended_export_layout.cols,...memory?.settings}),spritesheets:[]};

@@ -1,14 +1,17 @@
 const number = (min,max,integer=false) => ({type:integer?'integer':'number',minimum:min,maximum:max});
 const text = {type:'string',minLength:1,maxLength:4096};
-const framePaths={type:'array',minItems:2,maxItems:24,items:text};
+const imageBase64={type:'string',minLength:1,maxLength:12*1024*1024};
 const mode={type:'string',enum:['body','rightFoot','right_foot']};
 export const actions = {
   'agent/list-characters':{tool:'list_characters',description:'List SPRITED characters available for animation.',properties:{}},
   'agent/get-character':{tool:'get_character',description:'Get one SPRITED character and its reference image information.',properties:{id:text},required:['id']},
-  'agent/generate-animation':{tool:'generate_animation',description:'Create a direct-frame request, or complete a request by supplying ordered PNG/WebP frames.',properties:{character_id:text,animation_type:{type:'string',enum:['IDLE','HIT','DEATH','ATTACK','RANGE_ATTACK','WALKING']},run_id:text,frame_paths:framePaths},required:['character_id','animation_type']},
-  'agent/redo-animation':{tool:'redo_animation',description:'Create a new attempt from an existing animation, optionally with replacement PNG/WebP frames.',properties:{id:text,frame_paths:framePaths},required:['id']},
+  'agent/generate-animation':{tool:'generate_animation',description:'Create a new direct-frame animation request.',properties:{character_id:text,animation_type:{type:'string',enum:['IDLE','HIT','DEATH','ATTACK','RANGE_ATTACK','WALKING']}},required:['character_id','animation_type']},
+  'agent/redo-animation':{tool:'redo_animation',description:'Create a new empty attempt from an existing animation.',properties:{id:text},required:['id']},
   'agent/use-result':{tool:'use_result',description:'Choose a completed direct-frame attempt as the current result.',properties:{id:text},required:['id']},
   'agent/build-spritesheet':{tool:'build_spritesheet',description:'Build a PNG sprite sheet from a completed direct-frame attempt.',properties:{id:text,frames:number(2,24,true),cols:number(1,24,true)},required:['id']},
+  'agent/submit-frame':{tool:'submit_frame',description:'Submit one PNG/WebP frame to an animation without exposing SPRITED storage paths.',properties:{animation_id:text,frame_index:number(0,23,true),format:{type:'string',enum:['png','webp']},image_base64:imageBase64},required:['animation_id','frame_index','format','image_base64']},
+  'agent/replace-frame':{tool:'replace_frame',description:'Replace the image of an existing frame while preserving its stable frame ID and order.',properties:{animation_id:text,frame_id:text,format:{type:'string',enum:['png','webp']},image_base64:imageBase64},required:['animation_id','frame_id','format','image_base64']},
+  'agent/list-frames':{tool:'list_frames',description:'List ordered frame IDs and image metadata for one animation.',properties:{animation_id:text},required:['animation_id']},
   'character/rename':{tool:'sprited_rename_character',description:'Rename a character without changing its reference or previous attempts.',properties:{id:text,name:{type:'string',minLength:1,maxLength:120}},required:['id','name']},
   'character/replace-reference':{tool:'sprited_replace_character_reference',description:'Replace one character reference atomically; preserve previous attempt snapshots.',properties:{id:text,path:text,name:text},required:['id','path','name']},
   'connections/status':{tool:'sprited_get_connection_status',description:'Distinguish SPRITED server readiness from a live external MCP client. Does not certify generation capability.',properties:{}},
