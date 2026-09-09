@@ -1,3 +1,37 @@
+# Current checkpoint — SPRITED 0.8.0-preview.4
+
+2026-09-09. Startup detection/lock repair on the existing product. No UI or processing redesign in this milestone. The user's actual workspace was inspected read-only: PID 7816 was a live node service with an authenticated preview.3 setup response from a temporary archive directory. No user process was terminated and no user library was edited.
+
+## Fixes
+
+Open-Library.ps1 now verifies actual listener PID, process identity and authenticated SPRITED workspace identity; old releases use setup + matching workspace lock PID. It reconnects a verified older release instead of requiring Windows restart. Unrelated ports are ignored and a new local service uses an OS-selected free port. System inspection has a netstat/Get-Process fallback when CIM access is denied.
+
+Service lock handling is in automation/lock.mjs: compatible numeric PID read, structured PID/executable/start-time/nonce records, dead/reused PID recovery, empty-lock recovery, ownership-safe release, and a Windows OS mutex serializing recovery. Only automation.lock is removed on proven staleness. Existing library files remain intact. Unknown live owner identity is retained with an actionable log instead of guessed or killed.
+
+Detached spawn-service.mjs uses explicit log-file descriptors and appends rather than erasing old connection markers. Markers are hints only; the last URL must be verified. Native ProductLauncher.cs waits for startup process exit without waiting for inherited stderr EOF, and shows a short generic error rather than PowerShell traces. CLI default port remains 47821; explicit --port 0 is newly allowed. /identity is authenticated.
+
+## Verification
+
+PASS source startup acceptance: work/startup-preview4-test6.log — clean/reconnect, forced crash leaving structured lock, legacy dead PID/stale lock only, unrelated node with reused stale PID, unrelated occupied port, empty lock, concurrent recovery with one owner, and a real preview.3 server from another release. Marker data survived all cases.
+
+PASS lock-specific tests: work/lock-preview4-test.log — fresh empty lock, wrong-owner release protection, reused PID creation-time mismatch, live owner protection.
+
+PASS packaged shell/automation flow: work/shell-preview4-packaged.log — independent shell, full 8/24 PNG workflow, separate editor, live internal MCP connection, API, persistence and reference/history. Synthetic media only; actual user extension/generation not tested.
+
+PASS final packaged startup suite: work/startup-preview4-packaged-final.log — all required cases, including a real older release server and unrelated port/process, with preserved marker data and reachable UI. Earlier discovery tests exposed restricted CIM and inherited pipe EOF delays; those were addressed. No Godot work or model downloads.
+
+## Files and release
+
+See STARTUP-RECOVERY.md. Main files: automation/Open-Library.ps1, lock.mjs, spawn-service.mjs, service.mjs, http.mjs, cli.mjs; desktop/ProductLauncher.cs; tests/startup.test.mjs, lock.test.mjs; version/package/docs. Windows artifact: outputs/SPRITED-0.8.0-preview.4. Both executables compiled; packaged service/UI tested. Native user double-click launch remains the user's installed-environment check.
+
+## Next step
+
+Extract preview.4 to a permanent folder and launch SPRITED.exe; it will recover a stale lock or reconnect the verified existing server. No manual lock deletion or Windows restart is needed. If an owner is alive but cannot be verified, inspect startup.log. A reused old server continues serving its old release until it exits; this is intentional data-safe reconnection.
+
+Rerun acceptance from this source directory: set SPRITED_PLAYWRIGHT, SPRITED_STARTUP_TEST_ROOT to a fresh test folder, optional SPRITED_OLD_CLI to the retained preview.3 cli.mjs, then node tests/startup.test.mjs. Set SPRITED_STARTUP_SCRIPT to the packaged automation/Open-Library.ps1 for release coverage. Test workspaces are isolated under task work/; do not substitute the user's real library.
+
+---
+
 # Current checkpoint — SPRITED 0.8.0-preview.3
 
 2026-09-09. The user explicitly authorized replacement of the normal UI shell. The attached navy four-column image is the concrete visual target. This milestone is complete independently of any Godot or real AI provider test.

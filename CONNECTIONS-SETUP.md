@@ -1,3 +1,5 @@
+> Preview.4 startup fix: stale workspace locks are recovered automatically. A verified existing SPRITED server is reconnected, including older releases. An unrelated occupied port is ignored and a free port is selected. No Windows restart is required. Extract the release to a permanent folder before opening SPRITED.exe. See STARTUP-RECOVERY.md.
+
 > Preview.3 update: SPRITED.exe now launches the independent four-step product. The legacy editor is SPRITED-Advanced.exe or Open Advanced Editor (separate window). See SHELL-REDESIGN.md for current navigation; older UI descriptions below are historical.
 
 # SPRITED 0.8.0-preview.2 — manual MCP setup
@@ -8,7 +10,7 @@
 
 Extract the Windows ZIP to a permanent folder and open **SPRITED-Library.cmd**. Node.js 22+ and Microsoft Edge are prerequisites. **SPRITED.exe** is the preserved standalone advanced editor; use the Library launcher for the connected experience.
 
-If the launcher reports an older server, restart Windows, then launch this release. Saved data remains under `%LOCALAPPDATA%/SPRITED`. Closing the browser alone does not stop a background server. Advanced users who started a server in their terminal may stop that specific server with Ctrl+C instead. Do not delete the data folder.
+The launcher now verifies and reconnects an older running SPRITED server. Saved data remains under `%LOCALAPPDATA%/SPRITED`. Closing the browser alone does not stop a background server. Advanced users who started a server in their terminal may stop that specific server with Ctrl+C instead. Do not delete the data folder.
 
 ## Copy the exact configuration
 

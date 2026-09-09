@@ -1,6 +1,6 @@
 {
   "name": "sprited-automation",
-  "version": "0.8.0-preview.3",
+  "version": "0.8.0-preview.4",
   "private": true,
   "type": "module",
   "dependencies": { "playwright-core": "1.62.1" }

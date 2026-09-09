@@ -1,3 +1,5 @@
+> Preview.4 startup fix: stale workspace locks are recovered automatically. A verified existing SPRITED server is reconnected, including older releases. An unrelated occupied port is ignored and a free port is selected. No Windows restart is required. Extract the release to a permanent folder before opening SPRITED.exe. See STARTUP-RECOVERY.md.
+
 > Preview.3 update: SPRITED.exe now launches the independent four-step product. The legacy editor is SPRITED-Advanced.exe or Open Advanced Editor (separate window). See SHELL-REDESIGN.md for current navigation; older UI descriptions below are historical.
 
 # SPRITED 0.8.0-preview.2 — Character Library

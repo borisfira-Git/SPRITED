@@ -16,7 +16,7 @@ export function startMcp(service) {
         const agent=String(params?.clientInfo?.name||'MCP client').slice(0,120);
         await service.call('connections/heartbeat',{session_id,agent});clearInterval(heartbeatTimer);
         heartbeatTimer=setInterval(()=>{service.call('connections/heartbeat',{session_id,agent}).catch(()=>{});},30000);heartbeatTimer.unref();
-        initialized=true;send(id,{protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'sprited',version:'0.8.0-preview.3'}});
+        initialized=true;send(id,{protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'sprited',version:'0.8.0-preview.4'}});
       } else if(method==='ping')send(id,{});
       else if(!initialized)send(id,null,{code:-32002,message:'Initialize first'});
       else if(method==='tools/list')send(id,{tools});

@@ -26,7 +26,7 @@ try {
   const shutdown=async()=>{await service.close();process.exit(0);};process.on('SIGINT',shutdown);process.on('SIGTERM',shutdown);
   if(words[0]==='mcp')startMcp(service);
   else if(words[0]==='serve'){
-    const port=Number(options.port||47821);if(!Number.isInteger(port)||port<1||port>65535)throw new Error('Invalid port');
+    const port=Number(options.port??47821);if(!Number.isInteger(port)||port<0||port>65535)throw new Error('Invalid port');
     const running=await serve(service,port);
     console.log(`SPRITED API: http://127.0.0.1:${running.port}\nLibrary: http://127.0.0.1:${running.port}/ui/#${running.token}\nBearer token: ${running.token}`);
   } else {

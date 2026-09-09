@@ -6,6 +6,7 @@ import {existsSync} from 'node:fs';
 import {validate} from './contracts.mjs';
 import {diagnostics} from './diagnostics.mjs';
 import {Connections} from './connections.mjs';
+import {acquireLock,releaseLock} from './lock.mjs';
 const appRoot=fileURLToPath(new URL('../',import.meta.url));
 export const envelope=(result={},warnings=[],output_paths=[])=>({success:true,status:'ok',result,warnings,errors:[],output_paths,next_suggested_action:null});
 export const failure=error=>({success:false,status:'failed',result:null,warnings:[],errors:[error.message||String(error)],output_paths:[],next_suggested_action:null});
@@ -15,7 +16,7 @@ export class Service {
     this.root=await realpath(this.root);
     this.stateDir=await this.directory('.sprited');
     this.lockPath=path.join(this.stateDir,'automation.lock');
-    try {await writeFile(this.lockPath,String(process.pid),{flag:'wx'});this.ownsLock=true;}catch(error){if(error.code==='EEXIST')throw new Error('This workspace is already in use by SPRITED automation. Use the running API/MCP session or close it first.');throw error;}
+    this.lockContents=await acquireLock(this.lockPath,this.root);this.ownsLock=true;
     let module;try {module=await import('playwright-core');}catch(error){if(!process.env.SPRITED_PLAYWRIGHT)throw new Error('Run npm install in automation/ before using agents.');module=await import(pathToFileURL(process.env.SPRITED_PLAYWRIGHT).href);}
     this.browser=await module.chromium.launch({channel:'msedge',headless:true});
     this.page=await this.browser.newPage();
@@ -228,5 +229,5 @@ export class Service {
       return envelope(result,result?.warnings||[],outputs);
     }catch(error){if(before){await this.core('open',{project:before}).catch(()=>{});this.manifest=oldManifest;this.videoPath=oldVideo;}return failure(error);}
   }
-  async close(){await this.tail;await this.browser?.close();if(this.ownsLock){await unlink(this.lockPath);this.ownsLock=false;}}
+  async close(){await this.tail;await this.browser?.close();if(this.ownsLock){await releaseLock(this.lockPath,this.lockContents);this.ownsLock=false;}}
 }

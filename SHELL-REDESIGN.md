@@ -1,3 +1,5 @@
+> Preview.4 startup fix: stale workspace locks are recovered automatically. A verified existing SPRITED server is reconnected, including older releases. An unrelated occupied port is ignored and a free port is selected. No Windows restart is required. Extract the release to a permanent folder before opening SPRITED.exe. See STARTUP-RECOVERY.md.
+
 # SPRITED 0.8.0-preview.3 — independent product shell
 
 The default product is now the four-step workspace shown in the supplied visual reference. This is not a modal overlay: `/ui/` serves `public/shell.html` with no old editor DOM, import tabs, core processing scripts, or legacy navigation. The service still uses the original engine behind the API.
@@ -8,7 +10,7 @@ Run **SPRITED.exe** (or SPRITED-Library.cmd). Select/create a character, select 
 
 `SPRITED-Advanced.exe` is the optional standalone legacy editor. **Open Advanced Editor** in the product opens a separate browser window/tab at `/ui/editor.html`. Export options can open the selected processed attempt there. Closing that window leaves the product unchanged. Normal default launch intentionally changed; saved data and automation behavior did not.
 
-The library remains under the existing workspace (launcher default `%LOCALAPPDATA%/SPRITED`). If an older release server is still running, restart Windows before opening this release. Closing a browser does not stop the server.
+The library remains under the existing workspace (launcher default `%LOCALAPPDATA%/SPRITED`). An older running SPRITED server is verified and reused by the launcher. Closing a browser does not stop the server.
 
 ## Reference layout
 

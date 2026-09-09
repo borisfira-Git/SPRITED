@@ -22,6 +22,7 @@ export async function serve(service,port=47821,token=process.env.SPRITED_TOKEN||
       res.writeHead(403);res.end(JSON.stringify(failure(new Error('Local token authentication required; browser origins are not accepted.'))));return;
     }
     try {
+      if(url.pathname==='/identity'&&req.method==='GET'){res.end(JSON.stringify({application:'SPRITED',pid:process.pid,workspace:service.root,cli_path:path.join(root,'automation','cli.mjs')}));return;}
       if(url.pathname==='/ui/editor-project'&&req.method==='GET'){await service.tail;res.end(JSON.stringify(await service.core('snapshot')));return;}
       const asset=url.pathname.match(/^\/sheets\/([a-zA-Z0-9_-]+)\/asset\/(\d+)$/);
       if(asset&&req.method==='GET'){const r=await service.call('attempts/list');const sheet=r.result.flatMap(r=>r.spritesheets||[]).find(s=>s.id===asset[1]);const candidate=sheet?.output_paths[Number(asset[2])];if(!candidate)throw Error('Unknown sheet asset');const file=await service.input(candidate,['.png','.json','.spriteproject','.tres'],110*1024*1024);res.setHeader('content-type',file.endsWith('.png')?'image/png':'application/octet-stream');res.end(await readFile(file));return;}

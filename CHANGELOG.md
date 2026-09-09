@@ -1,3 +1,10 @@
+## 0.8.0-preview.4 — Recover startup state safely
+
+- Verify lock owner PID/executable/creation time and recover dead/reused/empty locks without changing library data.
+- Verify listener identity and reconnect a genuine older SPRITED server; unrelated processes and occupied ports no longer imply SPRITED conflicts.
+- Add inspection fallbacks, structured startup logs and detached file-backed service launch. Prevent native launcher stderr EOF hangs and raw script traces in dialogs.
+- Preserve the four-step UI, processing and automation workflows. Add startup/lock acceptance tests.
+
 ## 0.8.0-preview.3 — Independent SPRITED product shell
 
 - Replaced the default modal-over-editor experience with a dedicated navy four-column product, matching the supplied visual structure.
