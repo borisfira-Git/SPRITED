@@ -119,3 +119,4 @@ Project version remains 1 with an optional `workflow` extension (schema version 
 Validation reports geometry baseline drift, scale range, exact duplicate fraction, normalized pixel motion difference and loop-end difference. These have no calibrated semantic quality threshold. A `validated` status means checks ran; it does not prove a good walking cycle.
 
 No real Guardian animation was generated during this milestone. Automated tests use an explicitly synthetic reference and a prerecorded synthetic moving rectangle to verify plumbing. They are not evidence of character consistency or gait quality.
+`nPreview.2 validation: packaged connected GUI and core exports passed internal tests. Godot resource structure and import passed, but the Godot 4.5.1 runtime checker crashed twice; runtime loading is not verified for this build. See CHECKPOINT.md for logs.
