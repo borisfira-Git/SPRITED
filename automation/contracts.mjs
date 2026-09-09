@@ -2,6 +2,8 @@ const number = (min,max,integer=false) => ({type:integer?'integer':'number',mini
 const text = {type:'string',minLength:1,maxLength:4096};
 const imageBase64={type:'string',minLength:1,maxLength:12*1024*1024};
 const mode={type:'string',enum:['body','rightFoot','right_foot']};
+const semanticIssue={type:'object',properties:{type:{type:'string',enum:['anatomy','leg_progression','arm_leg_coordination','pose_duplicate','pose_regression','character_identity_drift','costume_or_armor_drift','direction_flip','silhouette_jump','motion_semantics','bad_visual_loop','other']},frame_index:number(0,23,true),severity:{type:'string',enum:['low','medium','high']},description:{type:'string',minLength:1,maxLength:500}},required:['type','severity','description'],additionalProperties:false};
+const supervisorResult={type:'object',properties:{passed:{type:'boolean'},score:number(0,100,true),issues:{type:'array',items:semanticIssue,maxItems:100}},required:['passed','score','issues'],additionalProperties:false};
 export const actions = {
   'agent/list-characters':{tool:'list_characters',description:'List SPRITED characters available for animation.',properties:{}},
   'agent/get-character':{tool:'get_character',description:'Get one SPRITED character and its reference image information.',properties:{id:text},required:['id']},
@@ -16,6 +18,10 @@ export const actions = {
   'agent/validate-animation':{tool:'validate_animation',description:'Run lightweight deterministic checks for frame order, dimensions, duplicates, jumps, center and scale drift.',properties:{animation_id:text},required:['animation_id']},
   'agent/detect-bad-frames':{tool:'detect_bad_frames',description:'Return prioritized frame indexes from the latest deterministic validation.',properties:{animation_id:text},required:['animation_id']},
   'agent/validate-loop':{tool:'validate_loop',description:'Validate the deterministic last-frame to first-frame transition.',properties:{animation_id:text},required:['animation_id']},
+  'agent/get-frame-asset':{tool:'get_frame_asset',description:'Retrieve one stored frame image by stable frame ID.',properties:{frame_id:text},required:['frame_id']},
+  'agent/build-contact-sheet':{tool:'build_contact_sheet',description:'Build an ordered PNG contact sheet for visual inspection.',properties:{animation_id:text,columns:number(1,24,true),include_frame_numbers:{type:'boolean'}},required:['animation_id']},
+  'agent/semantic-validate-frame':{tool:'semantic_validate_frame',description:'Store a structured external vision review for one frame.',properties:{frame_id:text,neighboring_frame_ids:{type:'array',items:text,maxItems:4},supervisor_result:supervisorResult},required:['frame_id','supervisor_result']},
+  'agent/semantic-validate-animation':{tool:'semantic_validate_animation',description:'Store a structured external vision review for an animation.',properties:{animation_id:text,supervisor_result:supervisorResult},required:['animation_id','supervisor_result']},
   'character/rename':{tool:'sprited_rename_character',description:'Rename a character without changing its reference or previous attempts.',properties:{id:text,name:{type:'string',minLength:1,maxLength:120}},required:['id','name']},
   'character/replace-reference':{tool:'sprited_replace_character_reference',description:'Replace one character reference atomically; preserve previous attempt snapshots.',properties:{id:text,path:text,name:text},required:['id','path','name']},
   'connections/status':{tool:'sprited_get_connection_status',description:'Distinguish SPRITED server readiness from a live external MCP client. Does not certify generation capability.',properties:{}},
@@ -74,6 +80,21 @@ export const actions = {
 };
 Object.assign(actions['animation/configure'].properties,{loop:{type:'boolean'},sampling:{type:'string',enum:['uniform','smart']}});
 for(const key of ['canvas_width','canvas_height','alignment','background_mode','background'])actions['spritesheet/create'].properties[key]=actions['animation/configure'].properties[key];
+function validateValue(value,s,label){
+  if(s.type==='array'){
+    if(!Array.isArray(value)||(s.minItems&&value.length<s.minItems)||(s.maxItems&&value.length>s.maxItems))throw new Error(`Invalid ${label}`);
+    value.forEach((item,index)=>validateValue(item,s.items,`${label}[${index}]`));return;
+  }
+  if(s.type==='object'){
+    if(!value||Array.isArray(value)||typeof value!=='object')throw new Error(`Invalid ${label}`);
+    for(const key of s.required||[])if(!(key in value))throw new Error(`Missing ${label}.${key}`);
+    for(const [key,item] of Object.entries(value)){if(s.additionalProperties===false&&!Object.hasOwn(s.properties,key))throw new Error(`Unknown argument: ${label}.${key}`);if(s.properties?.[key])validateValue(item,s.properties[key],`${label}.${key}`);}return;
+  }
+  if(s.type==='integer'?!Number.isInteger(value):typeof value!==s.type)throw new Error(`Invalid ${label}`);
+  if(typeof value==='number'&&(!Number.isFinite(value)||value<s.minimum||value>s.maximum))throw new Error(`Out of range: ${label}`);
+  if(typeof value==='string'&&((s.minLength&&value.length<s.minLength)||(s.maxLength&&value.length>s.maxLength)||(s.pattern&&!new RegExp(s.pattern).test(value))))throw new Error(`Invalid ${label}`);
+  if(s.enum&&!s.enum.includes(value))throw new Error(`Invalid ${label}`);
+}
 export function validate(action,args) {
   if(!Object.hasOwn(actions,action))throw new Error('Unknown SPRITED operation');
   const spec=actions[action];
@@ -81,16 +102,7 @@ export function validate(action,args) {
   for(const key of spec.required||[])if(!(key in args))throw new Error(`Missing ${key}`);
   for(const [key,value] of Object.entries(args)) {
     if(!Object.hasOwn(spec.properties,key))throw new Error(`Unknown argument: ${key}`);
-    const s=spec.properties[key];
-    if(s.type==='array'){
-      if(!Array.isArray(value)||(s.minItems&&value.length<s.minItems)||(s.maxItems&&value.length>s.maxItems))throw new Error(`Invalid ${key}`);
-      for(const item of value)if(typeof item!==s.items.type||item.length<s.items.minLength||item.length>s.items.maxLength)throw new Error(`Invalid ${key}`);
-      continue;
-    }
-    if(s.type==='integer'?!Number.isInteger(value):typeof value!==s.type)throw new Error(`Invalid ${key}`);
-    if(typeof value==='number'&&(!Number.isFinite(value)||value<s.minimum||value>s.maximum))throw new Error(`Out of range: ${key}`);
-    if(typeof value==='string'&&((s.minLength&&value.length<s.minLength)||(s.maxLength&&value.length>s.maxLength)||(s.pattern&&!new RegExp(s.pattern).test(value))))throw new Error(`Invalid ${key}`);
-    if(s.enum&&!s.enum.includes(value))throw new Error(`Invalid ${key}`);
+    validateValue(value,spec.properties[key],key);
   }
 }
 export const mcpActions=Object.fromEntries(Object.entries(actions).filter(([key])=>key.startsWith('agent/')));
