@@ -31,6 +31,8 @@ Project format remains version 1 with optional workflow extension. Library data 
 
 AUTO sampling is Uniform; SMART explicitly falls back to Uniform. Static sheet preview plus existing video/editor animation playback. Agent integration is pull-based: a live MCP session does not launch a generator or wake an idle agent. UI polling is four seconds; abrupt agent exits may remain green up to 90 seconds. Connection endpoints share service serialization, so long processing can delay status. Source submission remains video-only. Semantic gait/face/equipment validation and learned model ranking remain unimplemented. Advanced editor corrections do not automatically update stored attempt versions.
 
+User clarification at delivery: Godot runtime testing is NOT required. Successful spritesheet PNG creation/export is the acceptance criterion and has passed, including packaged 8/24-frame reuse and browser download. Do not spend further time on Godot for this milestone.
+
 ## Exact continuation
 
 After delivering preview.2, USER manually follows CONNECTIONS-SETUP.md and tests their extension. The next development milestone is a real available provider returning a genuine Guardian WALKING video through claim/submit-result, followed by visual review and exports. Do not use synthetic fixtures as evidence of real generation.
