@@ -1093,9 +1093,11 @@
       const records=r.frame_records||=[];let record;
       if(args.replace){record=records.find(frame=>frame.frame_id===args.record.frame_id);if(!record)throw Error('Frame not found');Object.assign(record,args.record,{frame_index:record.frame_index,created_at:record.created_at});}
       else {if(records.some(frame=>frame.frame_index===args.record.frame_index))throw Error('Frame index already exists; use replace_frame');record=args.record;records.push(record);}
-      r.source_mode='direct_frames';r.source_frame_paths=[];r.output_frames_paths=[];r.editor_snapshot=null;r.validation=null;r.sprite_sheet_path=null;r.godot_export_path=null;r.spritesheets=[];r.user_approved=false;r.approval_state='pending';r.status='collecting_frames';r.updated_at=new Date().toISOString();
+      r.source_mode='direct_frames';r.source_frame_paths=[];r.output_frames_paths=[];r.editor_snapshot=null;r.validation=null;r.technical_validation=null;r.current_preview_id=null;r.sprite_sheet_path=null;r.godot_export_path=null;r.spritesheets=[];r.user_approved=false;r.approval_state='pending';r.status='collecting_frames';r.updated_at=new Date().toISOString();
       const {storage_path,...publicRecord}=record;return result(publicRecord);
     }
+    if(action==='animation/record-validation'){r.technical_validation=structuredClone(args.validation);return result(r.technical_validation);}
+    if(action==='animation/record-preview'){r.gif_previews||=[];r.gif_previews.push(structuredClone(args.preview));r.current_preview_id=args.preview.preview_id;return result(args.preview);}
     if(action==='animation/configure'){const {id,...options}=args;const test=structuredClone(w);W.configure(test,id,options);commit();return W.configure(w,id,options);}
     if(action==='animation/attach-video'){commit();return W.attach(w,args.id,args.path);}
     if(action==='animation/submit-result'){

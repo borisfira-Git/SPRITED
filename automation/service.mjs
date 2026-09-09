@@ -8,6 +8,8 @@ import {diagnostics} from './diagnostics.mjs';
 import {Connections} from './connections.mjs';
 import {acquireLock,releaseLock} from './lock.mjs';
 import {ExternalManualProvider} from './image-provider.mjs';
+import {validateAnimation,detectBadFrames} from './animation-validator.mjs';
+import {encodeGif} from './gif-encoder.mjs';
 const appRoot=fileURLToPath(new URL('../',import.meta.url));
 export const envelope=(result={},warnings=[],output_paths=[])=>({success:true,status:'ok',result,warnings,errors:[],output_paths,next_suggested_action:null});
 export const failure=error=>({success:false,status:'failed',result:null,warnings:[],errors:[error.message||String(error)],output_paths:[],next_suggested_action:null});
@@ -118,6 +120,19 @@ export class Service {
     const frames=[];for(const record of records){const file=await this.input(record.storage_path,['.png','.webp'],9*1024*1024),bytes=await readFile(file);frames.push({path:record.storage_path,name:`Frame ${String(record.frame_index+1).padStart(2,'0')}`,src:`data:image/${record.format};base64,${bytes.toString('base64')}`});}
     return this.core('workflow/animation/attach-frames',{id,frames,provider:'external_manual'});
   }
+  async decodeStoredFrames(id,full=false){
+    const run=await this.core('workflow/animation/status',{id}),records=run.frame_records||[],inputs=[];
+    for(const record of records){try{const file=await this.input(record.storage_path,['.png','.webp'],9*1024*1024),bytes=await readFile(file);inputs.push({record,src:`data:image/${record.format};base64,${bytes.toString('base64')}`});}catch{inputs.push({record,src:null});}}
+    const decoded=await this.page.evaluate(async({inputs,full})=>Promise.all(inputs.map(async input=>{if(!input.src)return null;try{const image=await new Promise((resolve,reject)=>{const value=new Image();value.onload=()=>resolve(value);value.onerror=()=>reject(Error());value.src=input.src;});const scale=full?1:Math.min(1,128/image.naturalWidth,128/image.naturalHeight),width=Math.max(1,Math.round(image.naturalWidth*scale)),height=Math.max(1,Math.round(image.naturalHeight*scale)),canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;const context=canvas.getContext('2d',{willReadFrequently:true});context.drawImage(image,0,0,width,height);return {width:image.naturalWidth,height:image.naturalHeight,pixel_width:width,pixel_height:height,rgba:Array.from(context.getImageData(0,0,width,height).data)};}catch{return null;}})),{inputs,full});
+    return {run,frames:inputs.map((input,index)=>({frame_id:input.record.frame_id,animation_id:id,frame_index:input.record.frame_index,format:input.record.format,width:decoded[index]?.width||input.record.width,height:decoded[index]?.height||input.record.height,pixel_width:decoded[index]?.pixel_width,pixel_height:decoded[index]?.pixel_height,rgba:decoded[index]?.rgba||null}))};
+  }
+  async runTechnicalValidation(id){const {run,frames}=await this.decodeStoredFrames(id);const validation=validateAnimation(frames,{background:run.options.background,loop:run.options.loop??run.recipe_snapshot.loop});await this.core('workflow/animation/record-validation',{id,validation});await this.persist();return validation;}
+  async buildGifPreview(args){
+    const {run,frames}=await this.decodeStoredFrames(args.animation_id,true);if(frames.some(frame=>!frame.rgba))throw Error('All frames must be valid PNG/WebP images');if(frames.reduce((sum,frame)=>sum+frame.width*frame.height,0)>32*1024*1024)throw Error('Animation exceeds GIF pixel budget');
+    const ordered=[...frames].sort((a,b)=>a.frame_index-b.frame_index);if(ordered.some((frame,index)=>frame.frame_index!==index))throw Error('Frame indexes must be contiguous and start at 0');
+    const duration=args.frame_duration_ms||Math.max(20,Math.round((run.options.end-run.options.start)*1000/ordered.length)||80),loop=args.loop??run.options.loop??run.recipe_snapshot.loop,bytes=encodeGif(ordered,{frame_duration_ms:duration,loop}),previewId=randomUUID(),dir=await this.directory(`SPRITED_DATA/characters/${run.character_profile_id}/animations/${run.animation_type.toLowerCase()}/${run.id}/previews`),file=path.join(dir,previewId+'.gif');await writeFile(file,bytes,{flag:'wx'});
+    const preview={preview_id:previewId,animation_id:run.id,frame_count:ordered.length,width:ordered[0].width,height:ordered[0].height,frame_duration_ms:duration,loop,format:'gif',asset_reference:`preview:${previewId}`,storage_path:path.relative(this.root,file)};await this.core('workflow/animation/record-preview',{id:run.id,preview});await this.persist();const {storage_path,...result}=preview;return result;
+  }
   call(action,args={}){const run=this.tail.then(()=>this.execute(action,args));this.tail=run.catch(()=>{});return run;}
   async execute(action,args){
     let before,oldManifest,oldVideo;
@@ -141,6 +156,10 @@ export class Service {
       if(action==='agent/submit-frame'){result=await this.storeExternalFrame(args,false);return {...envelope(result),status:'stored',next_suggested_action:'Submit the next frame or call list_frames.'};}
       if(action==='agent/replace-frame'){result=await this.storeExternalFrame(args,true);return {...envelope(result),status:'replaced',next_suggested_action:'Call list_frames to verify the sequence.'};}
       if(action==='agent/list-frames')return envelope(await this.core('workflow/animation/list-frames',{id:args.animation_id}));
+      if(action==='agent/build-gif'){result=await this.buildGifPreview(args);return {...envelope(result),status:'ready'};}
+      if(action==='agent/validate-animation'){result=await this.runTechnicalValidation(args.animation_id);return {...envelope(result),status:result.passed?'passed':'issues_found'};}
+      if(action==='agent/detect-bad-frames'){const run=await this.core('workflow/animation/status',{id:args.animation_id}),validation=run.technical_validation||await this.runTechnicalValidation(args.animation_id);return envelope(detectBadFrames(validation));}
+      if(action==='agent/validate-loop'){const run=await this.core('workflow/animation/status',{id:args.animation_id}),validation=run.technical_validation||await this.runTechnicalValidation(args.animation_id);return {...envelope({animation_id:args.animation_id,...validation.loop_validation}),status:validation.loop_validation.passed?'passed':'issues_found'};}
       if(action==='agent/build-spritesheet'){let run=await this.core('workflow/animation/status',{id:args.id});if(run.frame_records?.length&&run.source_frame_paths?.length!==run.frame_records.length){await this.materializeStoredFrames(args.id);await this.persist();run=await this.core('workflow/animation/status',{id:args.id});}const built=await this.execute('spritesheet/create',{id:args.id,frames:args.frames||run.source_frame_paths?.length,cols:args.cols});if(built.result)built.result=compactAgentResult(built.result);return built;}
       if(action==='diagnostics/status')return envelope(await diagnostics(this.root));
       if(action==='character/purge'){
