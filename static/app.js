@@ -1026,6 +1026,12 @@
         }
         case "status": return {project:state.projectName,frame_count:state.frames.length,frame_size:[state.canvasWidth,state.canvasHeight],alignment:state.alignmentMode,duration_ms:state.frames.reduce((n,f)=>n+f.duration,0)};
         case "frames": return state.frames.map(({src,...frame})=>frame);
+        case "select-frames": {
+          const count=args.count;if(!Number.isInteger(count)||count<2||count>state.frames.length)throw new Error(`Choose 2–${state.frames.length} frames`);
+          if(count===state.frames.length)return {selected:count,indices:state.frames.map((_,i)=>i)};
+          const all=state.frames,indices=Array.from({length:count},(_,i)=>state.loop?Math.floor(i*all.length/count):Math.round(i*(all.length-1)/(count-1)));
+          state.frames=indices.map(i=>all[i]);state.selectedId=state.referenceId=state.frames[0].id;state.selectedIds=state.frames.map(f=>f.id);state.selectionAnchorId=state.frames[0].id;renderAll();return {selected:count,indices};
+        }
         case "extract": {
           const video=document.createElement("video"),controller=new AbortController();video.muted=true;
           try {
@@ -1087,6 +1093,22 @@
     if(action==='animation/submit-result'){
       if(r.status!=='queued')throw Error('Results can only be submitted to a queued run');
       commit();W.attach(w,args.id,args.path);r.selected_provider=args.provider;r.provider_metadata={provider_name:args.provider,submitted_at:new Date().toISOString(),origin:'external_agent',verified_generation:false};return result(r);
+    }
+    if(action==='animation/attach-frames'){
+      if(!Array.isArray(args.frames)||args.frames.length<2||args.frames.length>24)throw Error('Provide 2–24 ordered PNG/WebP frames');
+      for(const frame of args.frames)W.image(frame.src);
+      commit();
+      const o=r.options,duration=(o.end-o.start)*1000/args.frames.length;
+      restore({...editorSnapshot(),frames:[],selectedId:null,selectedIds:[],selectionAnchorId:null,referenceId:null,projectName:r.character_reference.name+'_'+r.animation_type.toLowerCase(),canvasWidth:o.canvas_width,canvasHeight:o.canvas_height,loop:o.loop??r.recipe_snapshot.loop,alignmentMode:o.alignment,workflow:w});
+      const run=W.get(state.workflow,args.id),created=[];
+      for(let i=0;i<args.frames.length;i++){const input=args.frames[i],frame=await makeFrame(input.src,input.name||`Frame ${String(i+1).padStart(2,'0')}`);frame.duration=duration;created.push(frame);}
+      state.frames=created;state.selectedId=state.referenceId=created[0].id;state.selectedIds=created.map(f=>f.id);state.selectionAnchorId=created[0].id;
+      run.source_mode='direct_frames';run.source_video_path=null;run.source_frame_paths=args.frames.map(f=>f.path);run.source_frame_count=created.length;run.output_frames_paths=[...run.source_frame_paths];run.selected_provider=args.provider||'external_agent';run.provider_metadata={provider_name:run.selected_provider,submitted_at:new Date().toISOString(),origin:'external_agent',verified_generation:false};run.user_approved=false;run.approval_state='pending';run.errors=[];run.status='processing';
+      if(o.background_mode==='key')await window.SpritedCore.dispatch('remove-background',{color:o.background,tolerance:52,softness:12});
+      await window.SpritedCore.dispatch('align',{mode:o.alignment});await window.SpritedCore.dispatch('normalize',{mode:o.alignment});
+      run.validation=await window.SpritedCore.dispatch('validate');run.warnings=[...run.validation.warnings];run.status='validated';run.updated_at=new Date().toISOString();run.editor_snapshot=editorSnapshot();
+      const job=state.workflow.jobs.find(j=>j.attempt_id===run.id);if(job){job.status='RESULT_SUBMITTED';job.result_paths=[...run.source_frame_paths];job.claim_token=null;job.updated_at=run.updated_at;}
+      return result({...run,editor_snapshot:undefined});
     }
     if(action==='animation/record-export'){r.sprite_sheet_path=args.paths.find(p=>p.endsWith('spritesheet.png'))||null;r.godot_export_path=args.paths.find(p=>p.endsWith('animation.tres'))||null;r.status='exported';r.updated_at=new Date().toISOString();return result({...r,editor_snapshot:undefined});}
     if(action==='animation/record-sheet'){r.spritesheets ||= [];r.spritesheets.push({id:args.sheet_id,frame_count:args.frames,sampling:args.sampling,output_paths:args.paths,created_at:new Date().toISOString(),warnings:r.warnings});r.sprite_sheet_path=args.paths.find(p=>p.endsWith('spritesheet.png'));r.user_approved=args.approved;r.approval_state=args.approval_state;r.status=args.approved?'approved':'validated';return result({...r,editor_snapshot:undefined});}

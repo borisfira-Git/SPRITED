@@ -1,7 +1,14 @@
 const number = (min,max,integer=false) => ({type:integer?'integer':'number',minimum:min,maximum:max});
 const text = {type:'string',minLength:1,maxLength:4096};
+const framePaths={type:'array',minItems:2,maxItems:24,items:text};
 const mode={type:'string',enum:['body','rightFoot','right_foot']};
 export const actions = {
+  'agent/list-characters':{tool:'list_characters',description:'List SPRITED characters available for animation.',properties:{}},
+  'agent/get-character':{tool:'get_character',description:'Get one SPRITED character and its reference image information.',properties:{id:text},required:['id']},
+  'agent/generate-animation':{tool:'generate_animation',description:'Create a direct-frame request, or complete a request by supplying ordered PNG/WebP frames.',properties:{character_id:text,animation_type:{type:'string',enum:['IDLE','HIT','DEATH','ATTACK','RANGE_ATTACK','WALKING']},run_id:text,frame_paths:framePaths},required:['character_id','animation_type']},
+  'agent/redo-animation':{tool:'redo_animation',description:'Create a new attempt from an existing animation, optionally with replacement PNG/WebP frames.',properties:{id:text,frame_paths:framePaths},required:['id']},
+  'agent/use-result':{tool:'use_result',description:'Choose a completed direct-frame attempt as the current result.',properties:{id:text},required:['id']},
+  'agent/build-spritesheet':{tool:'build_spritesheet',description:'Build a PNG sprite sheet from a completed direct-frame attempt.',properties:{id:text,frames:number(2,24,true),cols:number(1,24,true)},required:['id']},
   'character/rename':{tool:'sprited_rename_character',description:'Rename a character without changing its reference or previous attempts.',properties:{id:text,name:{type:'string',minLength:1,maxLength:120}},required:['id','name']},
   'character/replace-reference':{tool:'sprited_replace_character_reference',description:'Replace one character reference atomically; preserve previous attempt snapshots.',properties:{id:text,path:text,name:text},required:['id','path','name']},
   'connections/status':{tool:'sprited_get_connection_status',description:'Distinguish SPRITED server readiness from a live external MCP client. Does not certify generation capability.',properties:{}},
@@ -54,7 +61,7 @@ export const actions = {
   'frames/remove-background': {tool:'sprited_remove_background',description:'Apply the editor chroma-key removal. Intended for solid backgrounds.',properties:{color:{type:'string',pattern:'^#[0-9a-fA-F]{6}$'},tolerance:number(0,442),softness:number(0,80)}},
   'animation/validate': {tool:'sprited_validate_animation',description:'Check empty frames, scale, baseline and clipping; not semantic motion quality.',properties:{}},
   'animation/preview': {tool:'sprited_preview_animation',description:'Write a standalone local HTML animation preview in the output directory.',properties:{}},
-  'spritesheet/build': {tool:'sprited_build_spritesheet',description:'Build a PNG sheet and JSON metadata using the editor renderer.',properties:{cols:number(1,120,true)},required:['cols']},
+  'spritesheet/build': {tool:'sprited_build_spritesheet',description:'Build a PNG sheet and JSON metadata using the editor renderer.',properties:{folder:text,cols:number(1,120,true)},required:['cols']},
   'export/godot': {tool:'sprited_export_godot',description:'Write a sheet, metadata and Godot 4 SpriteFrames resource beneath the workspace.',properties:{folder:text,cols:number(1,120,true)}},
   'status': {tool:'sprited_get_status',description:'Read the active project state and manifest.',properties:{}}
 };
@@ -68,10 +75,16 @@ export function validate(action,args) {
   for(const [key,value] of Object.entries(args)) {
     if(!Object.hasOwn(spec.properties,key))throw new Error(`Unknown argument: ${key}`);
     const s=spec.properties[key];
+    if(s.type==='array'){
+      if(!Array.isArray(value)||(s.minItems&&value.length<s.minItems)||(s.maxItems&&value.length>s.maxItems))throw new Error(`Invalid ${key}`);
+      for(const item of value)if(typeof item!==s.items.type||item.length<s.items.minLength||item.length>s.items.maxLength)throw new Error(`Invalid ${key}`);
+      continue;
+    }
     if(s.type==='integer'?!Number.isInteger(value):typeof value!==s.type)throw new Error(`Invalid ${key}`);
     if(typeof value==='number'&&(!Number.isFinite(value)||value<s.minimum||value>s.maximum))throw new Error(`Out of range: ${key}`);
     if(typeof value==='string'&&((s.minLength&&value.length<s.minLength)||(s.maxLength&&value.length>s.maxLength)||(s.pattern&&!new RegExp(s.pattern).test(value))))throw new Error(`Invalid ${key}`);
     if(s.enum&&!s.enum.includes(value))throw new Error(`Invalid ${key}`);
   }
 }
-export const tools=Object.values(actions).map(s=>({name:s.tool,description:s.description,inputSchema:{type:'object',properties:s.properties,required:s.required||[],additionalProperties:false}}));
+export const mcpActions=Object.fromEntries(Object.entries(actions).filter(([key])=>key.startsWith('agent/')));
+export const tools=Object.values(mcpActions).map(s=>({name:s.tool,description:s.description,inputSchema:{type:'object',properties:s.properties,required:s.required||[],additionalProperties:false}}));

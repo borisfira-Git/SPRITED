@@ -1,5 +1,5 @@
 import {createInterface} from 'node:readline';
-import {actions,tools} from './contracts.mjs';
+import {mcpActions,tools} from './contracts.mjs';
 import {randomUUID} from 'node:crypto';
 export function startMcp(service) {
   const input=createInterface({input:process.stdin,crlfDelay:Infinity});let initialized=false,queue=Promise.resolve();
@@ -16,12 +16,12 @@ export function startMcp(service) {
         const agent=String(params?.clientInfo?.name||'MCP client').slice(0,120);
         await service.call('connections/heartbeat',{session_id,agent});clearInterval(heartbeatTimer);
         heartbeatTimer=setInterval(()=>{service.call('connections/heartbeat',{session_id,agent}).catch(()=>{});},30000);heartbeatTimer.unref();
-        initialized=true;send(id,{protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'sprited',version:'0.8.0-preview.4'}});
+        initialized=true;send(id,{protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'sprited',version:'0.9.0-dev'}});
       } else if(method==='ping')send(id,{});
       else if(!initialized)send(id,null,{code:-32002,message:'Initialize first'});
       else if(method==='tools/list')send(id,{tools});
       else if(method==='tools/call'){
-        const action=Object.entries(actions).find(([,s])=>s.tool===params?.name)?.[0];
+        const action=Object.entries(mcpActions).find(([,s])=>s.tool===params?.name)?.[0];
         if(!action){send(id,null,{code:-32602,message:'Unknown tool'});return;}
         const result=await service.call(action,params.arguments||{});
         send(id,{content:[{type:'text',text:JSON.stringify(result)}],structuredContent:result,isError:!result.success});

@@ -34,6 +34,8 @@ export async function serve(service,port=47821,token=process.env.SPRITED_TOKEN||
       }
       const media=url.pathname.match(/^\/attempts\/([a-zA-Z0-9_-]+)\/video$/);
       if(media&&req.method==='GET'){const r=await service.call('animation/status',{id:media[1]});if(!r.success||!r.result.source_video_path)throw Error('No video result');const file=await service.input(r.result.source_video_path,['.mp4','.webm','.mov'],250*1024*1024);res.setHeader('content-type',file.endsWith('.webm')?'video/webm':'video/mp4');res.end(await readFile(file));return;}
+      const frame=url.pathname.match(/^\/attempts\/([a-zA-Z0-9_-]+)\/frames\/(\d+)$/);
+      if(frame&&req.method==='GET'){const r=await service.call('animation/status',{id:frame[1]}),candidate=r.result?.source_frame_paths?.[Number(frame[2])];if(!r.success||!candidate)throw Error('No animation frame');const file=await service.input(candidate,['.png','.webp'],9*1024*1024);res.setHeader('content-type',file.endsWith('.webp')?'image/webp':'image/png');res.end(await readFile(file));return;}
       const route=new URL(req.url,'http://127.0.0.1').pathname.slice(1);
       const aliases={'character':'character/show','character/reference':'character/set-reference','recipes':'recipes/list','providers':'providers/list','characters':req.method==='GET'?'character/list':'character/create','generation-jobs':req.method==='GET'?'jobs/list':'jobs/create','attempts':'attempts/list','trash':'character/trash'};
       let action=Object.hasOwn(aliases,route)?aliases[route]:route;

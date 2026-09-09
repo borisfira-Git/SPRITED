@@ -10,6 +10,12 @@ import {acquireLock,releaseLock} from './lock.mjs';
 const appRoot=fileURLToPath(new URL('../',import.meta.url));
 export const envelope=(result={},warnings=[],output_paths=[])=>({success:true,status:'ok',result,warnings,errors:[],output_paths,next_suggested_action:null});
 export const failure=error=>({success:false,status:'failed',result:null,warnings:[],errors:[error.message||String(error)],output_paths:[],next_suggested_action:null});
+const compactAgentResult=value=>{
+  if(Array.isArray(value))return value.map(compactAgentResult);
+  const result=structuredClone(value);delete result.reference_image;
+  if(result.character_reference)delete result.character_reference.reference_image;
+  return result;
+};
 export class Service {
   constructor(root){this.root=path.resolve(root);this.tail=Promise.resolve();this.manifest={version:1,character:'Character',animation:'animation',source_video:null,target_frames:24,background:'#00ff00',alignment:'body',frame_size:[512,512]};}
   async init(){
@@ -91,6 +97,14 @@ export class Service {
     const temp=path.join(this.stateDir,`${randomUUID()}.tmp`);
     await writeFile(temp,JSON.stringify({manifest:this.manifest,project}),{flag:'wx'});await rename(temp,target);
   }
+  async attachDirectFrames(id,framePaths,provider='external_agent'){
+    const run=await this.core('workflow/animation/status',{id}),dir=await this.directory(`SPRITED_DATA/characters/${run.character_profile_id}/animations/${run.animation_type.toLowerCase()}/${run.id}/frames`),frames=[],outputs=[];
+    for(let i=0;i<framePaths.length;i++){
+      const source=await this.input(framePaths[i],['.png','.webp'],9*1024*1024),ext=path.extname(source).toLowerCase(),target=path.join(dir,`frame-${String(i+1).padStart(3,'0')}-${randomUUID()}${ext}`),bytes=await readFile(source);
+      await writeFile(target,bytes,{flag:'wx'});outputs.push(target);frames.push({path:path.relative(this.root,target),name:`Frame ${String(i+1).padStart(2,'0')}`,src:`data:image/${ext.slice(1)};base64,${bytes.toString('base64')}`});
+    }
+    const result=await this.core('workflow/animation/attach-frames',{id,frames,provider});await this.persist();return {result,outputs};
+  }
   call(action,args={}){const run=this.tail.then(()=>this.execute(action,args));this.tail=run.catch(()=>{});return run;}
   async execute(action,args){
     let before,oldManifest,oldVideo;
@@ -100,6 +114,23 @@ export class Service {
       before=await this.core('snapshot');oldManifest=structuredClone(this.manifest);oldVideo=this.videoPath;
       let result,outputs=[];
       const mode=(args.mode||this.manifest.alignment)==='right_foot'?'rightFoot':args.mode||this.manifest.alignment;
+      if(action==='agent/list-characters')return envelope(compactAgentResult(await this.core('workflow/character/list')));
+      if(action==='agent/get-character')return envelope(compactAgentResult(await this.core('workflow/character/select',{id:args.id})));
+      if(action==='agent/generate-animation'){
+        const recipes=await this.core('workflow/recipes/list'),recipe=recipes.find(r=>r.animation_type===args.animation_type);if(!recipe)throw Error('Unknown animation type');
+        let job;
+        if(args.run_id){const run=await this.core('workflow/animation/status',{id:args.run_id});if(run.character_profile_id!==args.character_id||run.animation_type!==args.animation_type||run.status!=='queued')throw Error('run_id is not the matching queued animation request');job=await this.core('workflow/jobs/get',{id:run.job_id});}
+        else {job=await this.core('workflow/jobs/create',{character_id:args.character_id,animation_type:args.animation_type,duration:recipe.target_duration,loop:recipe.loop,frames:args.frame_paths?.length||recipe.default_output_frame_count,sampling:'uniform'});await this.directory(job.output_directory);await writeFile(path.join(this.root,job.output_directory,'job.json'),JSON.stringify(job,null,2),{flag:'wx'});}
+        if(!args.frame_paths){await this.persist();return {...envelope(compactAgentResult(job)),status:'queued',next_suggested_action:'Generate ordered PNG/WebP frames, then call generate_animation with this attempt_id as run_id and frame_paths.'};}
+        const attached=await this.attachDirectFrames(job.attempt_id,args.frame_paths);return {...envelope(compactAgentResult(attached.result),attached.result.warnings||[],attached.outputs),status:'validated',next_suggested_action:'Review the frames, then call use_result.'};
+      }
+      if(action==='agent/redo-animation'){
+        const job=await this.core('workflow/attempts/redo',{id:args.id});await this.directory(job.output_directory);await writeFile(path.join(this.root,job.output_directory,'job.json'),JSON.stringify(job,null,2),{flag:'wx'});
+        if(!args.frame_paths){await this.persist();return {...envelope(compactAgentResult(job)),status:'queued',next_suggested_action:'Generate a replacement ordered frame sequence, then call redo_animation with frame_paths.'};}
+        const attached=await this.attachDirectFrames(job.attempt_id,args.frame_paths);return {...envelope(compactAgentResult(attached.result),attached.result.warnings||[],attached.outputs),status:'validated',next_suggested_action:'Review the frames, then call use_result.'};
+      }
+      if(action==='agent/use-result'){result=await this.core('workflow/animation/approve',{id:args.id});await this.persist();return {...envelope(compactAgentResult(result),result.warnings||[]),status:'approved',next_suggested_action:'Call build_spritesheet.'};}
+      if(action==='agent/build-spritesheet'){const run=await this.core('workflow/animation/status',{id:args.id}),built=await this.execute('spritesheet/create',{id:args.id,frames:args.frames||run.source_frame_paths?.length,cols:args.cols});if(built.result)built.result=compactAgentResult(built.result);return built;}
       if(action==='diagnostics/status')return envelope(await diagnostics(this.root));
       if(action==='character/purge'){
         const c=before.workflow?.characters.find(c=>c.id===args.id);if(!c)throw Error('Character not found');
@@ -115,22 +146,23 @@ export class Service {
         return envelope(deleted,warnings);
       }
       if(action==='spritesheet/create'){
-        const run=await this.core('workflow/animation/status',{id:args.id});if(!run.source_video_path)throw Error('Receive a video result first');
-        this.videoPath=await this.input(run.source_video_path,['.mp4','.webm','.mov'],250*1024*1024);
+        const run=await this.core('workflow/animation/status',{id:args.id});if(!run.source_video_path&&!run.source_frame_paths?.length)throw Error('Receive animation frames first');
         const processing={};for(const key of ['canvas_width','canvas_height','alignment','background_mode','background'])if(key in args)processing[key]=args[key];
-        await this.core('workflow/animation/configure',{id:args.id,output_frames:args.frames,source_frames:Math.max(run.options.source_frames,args.frames),sampling:args.sampling||'uniform',...processing});
-        const processed=await this.core('workflow/animation/process',{id:args.id,url:'http://sprited.local/source-video?'+randomUUID(),exact_output:true});
-        if(processed.status==='failed')throw Error(processed.errors.join('; '));
-        const processedState=await this.core('snapshot');
-        await this.core('workflow/animation/open',{id:args.id});
+        let processed={warnings:run.warnings||[]},processedState;
+        if(run.source_frame_paths?.length){await this.core('workflow/animation/open',{id:args.id});await this.core('select-frames',{count:args.frames||run.source_frame_paths.length});processedState=await this.core('snapshot');}
+        else {
+          this.videoPath=await this.input(run.source_video_path,['.mp4','.webm','.mov'],250*1024*1024);
+          await this.core('workflow/animation/configure',{id:args.id,output_frames:args.frames,source_frames:Math.max(run.options.source_frames,args.frames),sampling:args.sampling||'uniform',...processing});
+          processed=await this.core('workflow/animation/process',{id:args.id,url:'http://sprited.local/source-video?'+randomUUID(),exact_output:true});if(processed.status==='failed')throw Error(processed.errors.join('; '));processedState=await this.core('snapshot');await this.core('workflow/animation/open',{id:args.id});
+        }
         const folder=`SPRITED_DATA/characters/${run.character_profile_id}/animations/${run.animation_type.toLowerCase()}/${run.id}/spritesheets`;
-        const exported=await this.execute('export/godot',{folder,cols:args.cols||run.options.cols});
+        const exported=await this.execute(run.source_frame_paths?.length?'spritesheet/build':'export/godot',{folder,cols:args.cols||run.options.cols});
         if(!exported.success)throw Error(exported.errors.join('; '));
         const preview=await this.core('preview'),dir=path.dirname(exported.output_paths[0]);
         for(let i=0;i<preview.frames.length;i++){const file=path.join(dir,`frame_${String(i).padStart(3,'0')}.png`);await writeFile(file,Buffer.from(preview.frames[i].src.split(',')[1],'base64'),{flag:'wx'});exported.output_paths.push(file);}
         await this.core('open',{project:processedState});
         const saved=await this.core('workflow/animation/record-sheet',{id:args.id,sheet_id:randomUUID(),frames:args.frames,sampling:args.sampling||'uniform',paths:exported.output_paths,approved:run.user_approved,approval_state:run.approval_state});await this.persist();
-        return {...envelope(saved,processed.warnings,exported.output_paths),status:'ready'};
+        return {...envelope(saved,processed.warnings||[],exported.output_paths),status:'ready'};
       }
       if(action==='animation/export-godot'){
         const run=await this.core('workflow/animation/status',{id:args.id});
