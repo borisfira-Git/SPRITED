@@ -4,6 +4,7 @@ const root = new URL("../", import.meta.url);
 const html = await readFile(new URL("static/index.html", root), "utf8");
 const css = await readFile(new URL("app/globals.css", root), "utf8");
 const js = await readFile(new URL("static/app.js", root), "utf8");
+const video = await readFile(new URL("public/video-import.js", root), "utf8");
 const og = await readFile(new URL("public/og.png", root));
 
 const worker = `const assets = {
@@ -11,6 +12,7 @@ const worker = `const assets = {
   "/index.html": { type: "text/html; charset=utf-8", body: ${JSON.stringify(html)} },
   "/style.css": { type: "text/css; charset=utf-8", body: ${JSON.stringify(css)} },
   "/app.js": { type: "text/javascript; charset=utf-8", body: ${JSON.stringify(js)} },
+  "/video-import.js": { type: "text/javascript; charset=utf-8", body: ${JSON.stringify(video)} },
   "/og.png": { type: "image/png", base64: ${JSON.stringify(og.toString("base64"))} }
 };
 function decodeBase64(value) {

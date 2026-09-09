@@ -1,6 +1,6 @@
 # SPRITED for Windows
 
-Current version: `0.6.10`
+Current version: `0.7.0`
 
 `SPRITED.exe` is a portable Windows launcher. It opens the local application
 files in a dedicated Microsoft Edge application window.
@@ -28,5 +28,6 @@ an `app` folder next to it:
 - `static/index.html`
 - `app/globals.css` as `style.css`
 - `static/app.js`
+- `public/video-import.js`
 - `public/favicon.svg`
 - `public/og.png`

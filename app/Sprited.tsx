@@ -1,5 +1,7 @@
 "use client";
 
+import "../public/video-import.js";
+
 import {
   ChangeEvent,
   DragEvent,
@@ -15,6 +17,7 @@ type Bounds = { x: number; y: number; w: number; h: number };
 type AlignmentMode = "body" | "rightFoot";
 type BodyGeometry = { bounds: Bounds; anchorX: number; rightFootX: number; groundY: number; confidence: number; source: string };
 type Frame = {
+  videoSource?: { name: string; time: number };
   id: string;
   name: string;
   src: string;
@@ -966,6 +969,25 @@ export default function Sprited() {
     setDirty(true);
   }
 
+  function importVideo() {
+    setPlaying(false);
+    SpritedVideo.open({ onImport: async (samples, name, signal) => {
+      const created: Frame[] = [];
+      try {
+        for (const sample of samples) {
+          signal.throwIfAborted();
+          const frame = await makeFrame(sample.src, `${name.replace(/\.[^.]+$/, "")} ${String(created.length + 1).padStart(3, "0")}`, sample.duration);
+          frame.videoSource = { name, time: sample.time }; created.push(frame);
+        }
+        signal.throwIfAborted();
+        pushHistory(); if(!frames.length)setFps(1000/samples[0].duration); setFrames(items => [...items, ...created]);
+        setSelectedId(created[0].id); setSelectedIds(created.map(f => f.id)); setSelectionAnchorId(created[0].id);
+        setReferenceId(value => value || created[0].id); setDirty(true);
+        setStatus(`${created.length} video frames imported — remove background, then align and preview.`);
+        showToast(`${created.length} video frames imported`, "success");
+      } catch (error) { for (const sample of samples) imageCache.delete(sample.src); throw error; }
+    }});
+  }
   async function importSeparate(files: FileList | File[]) {
     const images = Array.from(files).filter((file) => file.type.startsWith("image/"));
     if (!images.length) return;
@@ -1647,7 +1669,7 @@ export default function Sprited() {
         <div className="brand">
           <div className="brand-mark"><span /><span /><span /><span /></div>
           <div className="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div>
-          <span className="version-badge">VER.0.6.10</span>
+          <span className="version-badge">VER.0.7.0</span>
         </div>
         <div className="project-title">
           <input value={projectName} onChange={(event) => { setProjectName(event.target.value); setDirty(true); }} aria-label="Project name" />
@@ -1674,6 +1696,7 @@ export default function Sprited() {
           <div className="import-stack">
             <button onClick={() => sheetInput.current?.click()}><span>▦</span><div><strong>Sprite Sheet</strong><small>Slice rows & columns</small></div></button>
             <button onClick={() => framesInput.current?.click()}><span>◇</span><div><strong>Separate Frames</strong><small>Add PNG images</small></div></button>
+            <button onClick={importVideo}><span>▷</span><div><strong>Animation Video</strong><small>Extract frames from a local clip</small></div></button>
           </div>
           <div className="list-tools">
             <button onClick={() => { if (frames[0]) { setSelectedId(frames[0].id); setSelectedIds([frames[0].id]); setSelectionAnchorId(frames[0].id); } }}>First</button>

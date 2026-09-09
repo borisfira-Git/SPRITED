@@ -1,0 +1,28 @@
+import {createInterface} from 'node:readline';
+import {actions,tools} from './contracts.mjs';
+export function startMcp(service) {
+  const input=createInterface({input:process.stdin,crlfDelay:Infinity});let initialized=false,queue=Promise.resolve();
+  const send=(id,result,error)=>process.stdout.write(JSON.stringify(error?{jsonrpc:'2.0',id,error}:{jsonrpc:'2.0',id,result})+'\n');
+  async function handle(line){
+    let message;
+    try{if(line.length>65536)throw new Error();message=JSON.parse(line);}catch{send(null,null,{code:-32700,message:'Parse error'});return;}
+    const {id,method,params}=message;
+    if(id===undefined)return;
+    if(message.jsonrpc!=='2.0'||typeof method!=='string'){send(id,null,{code:-32600,message:'Invalid request'});return;}
+    try {
+      if(method==='initialize'){
+        initialized=true;send(id,{protocolVersion:'2025-06-18',capabilities:{tools:{listChanged:false}},serverInfo:{name:'sprited',version:'0.7.0'}});
+      } else if(method==='ping')send(id,{});
+      else if(!initialized)send(id,null,{code:-32002,message:'Initialize first'});
+      else if(method==='tools/list')send(id,{tools});
+      else if(method==='tools/call'){
+        const action=Object.entries(actions).find(([,s])=>s.tool===params?.name)?.[0];
+        if(!action){send(id,null,{code:-32602,message:'Unknown tool'});return;}
+        const result=await service.call(action,params.arguments||{});
+        send(id,{content:[{type:'text',text:JSON.stringify(result)}],structuredContent:result,isError:!result.success});
+      }else send(id,null,{code:-32601,message:'Method not found'});
+    }catch(error){send(id,null,{code:-32603,message:error.message});}
+  }
+  input.on('line',line=>{queue=queue.then(()=>handle(line));});
+  input.on('close',()=>{queue.then(()=>service.close()).catch(error=>console.error(error.message));});
+}

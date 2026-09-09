@@ -639,6 +639,30 @@
     $("#alignmentMode").value=state.alignmentMode;
     $("#fpsInput").value = state.fps; $("#loopBtn").classList.toggle("active", state.loop);
   }
+  async function appendVideoSamples(samples, name, signal) {
+      const created = [];
+      try {
+        for (const sample of samples) {
+          signal.throwIfAborted();
+          const f = await makeFrame(sample.src, `${name.replace(/\.[^.]+$/, "")} ${String(created.length + 1).padStart(3, "0")}`);
+          f.duration = sample.duration;
+          f.videoSource = { name, time: sample.time };
+          created.push(f);
+        }
+        signal.throwIfAborted();
+        commit();
+        if(!state.frames.length){state.fps=1000/samples[0].duration;$("#fpsInput").value=state.fps;}
+        state.frames.push(...created);
+        state.selectedId = created[0].id; state.selectedIds = created.map(f => f.id); state.selectionAnchorId = created[0].id;
+        state.referenceId ||= created[0].id;
+        renderAll(); fitZoom(); status(`${created.length} video frames imported — remove background, then align and preview.`);
+        toast(`${created.length} video frames imported`, "success");
+      } catch (error) { for (const sample of samples) images.delete(sample.src); throw error; }
+  }
+  function importVideo() {
+    stop();
+    SpritedVideo.open({ onImport: appendVideoSamples });
+  }
   async function importFrames(files) {
     const list = [...files].filter((f) => f.type.startsWith("image/")); if (!list.length) return;
     commit(); status(`Importing ${list.length} frames…`); const created = [];
@@ -721,9 +745,9 @@
   async function detectBounds(){const f=selected();if(!f)return;commit();const b=await alphaBounds(f.src);f.charBounds={x:b.x,y:b.y,w:b.w,h:b.h};f.alphaBounds={...f.charBounds};Object.assign(f,{bodyAligned:false,alignmentMode:undefined,bodyBounds:undefined,bodyAnchorX:undefined,rightFootX:undefined,bodyGroundY:undefined,manualBodyAnchor:false});renderAll();toast("Character box detected")}
   async function trim(){const f=selected();if(!f)return;const b=await alphaBounds(f.src);if(b.empty)return toast("This frame is empty","error");commit();const image=await loadImage(f.src),c=document.createElement("canvas");c.width=b.w;c.height=b.h;c.getContext("2d").drawImage(image,b.x,b.y,b.w,b.h,0,0,b.w,b.h);f.src=c.toDataURL("image/png");f.sourceWidth=b.w;f.sourceHeight=b.h;f.alphaBounds={x:0,y:0,w:b.w,h:b.h};f.charBounds={x:clamp(f.charBounds.x-b.x,0,b.w-1),y:clamp(f.charBounds.y-b.y,0,b.h-1),w:Math.min(f.charBounds.w,b.w),h:Math.min(f.charBounds.h,b.h)};Object.assign(f,{bodyAligned:false,alignmentMode:undefined,bodyBounds:undefined,bodyAnchorX:undefined,rightFootX:undefined,bodyGroundY:undefined});images.clear();renderAll();toast("Transparent margins trimmed","success")}
   function hex(hex){return{r:parseInt(hex.slice(1,3),16),g:parseInt(hex.slice(3,5),16),b:parseInt(hex.slice(5,7),16)}}
-  async function removeBackground(all) {
+  async function removeBackground(all, settings = null) {
     const targets=all?state.frames:[selected()].filter(Boolean);if(!targets.length)return;commit();status(`Removing background from ${targets.length} frames…`);
-    const target=hex($("#bgColor").value),tol=Number($("#tolerance").value),soft=Number($("#softness").value);
+    const target=hex(settings?.color ?? $("#bgColor").value),tol=settings?.tolerance ?? Number($("#tolerance").value),soft=settings?.softness ?? Number($("#softness").value);
     for(const f of targets){const image=await loadImage(f.src),c=document.createElement("canvas");c.width=image.naturalWidth;c.height=image.naturalHeight;const x=c.getContext("2d",{willReadFrequently:true});x.drawImage(image,0,0);const id=x.getImageData(0,0,c.width,c.height),d=id.data;for(let i=0;i<d.length;i+=4){const dr=d[i]-target.r,dg=d[i+1]-target.g,db=d[i+2]-target.b,dist=Math.sqrt(dr*dr+dg*dg+db*db);if(dist<=tol)d[i+3]=0;else if(dist<tol+soft&&soft>0)d[i+3]=Math.round(d[i+3]*(dist-tol)/soft);if(d[i+1]>d[i]*1.15&&d[i+1]>d[i+2]*1.15&&dist<tol+soft*2)d[i+1]=Math.max(d[i],d[i+2])}x.putImageData(id,0,0);f.src=c.toDataURL("image/png");const b=await alphaBounds(f.src);f.alphaBounds={x:b.x,y:b.y,w:b.w,h:b.h};f.charBounds={...f.alphaBounds};Object.assign(f,{bodyAligned:false,alignmentMode:undefined,bodyBounds:undefined,bodyAnchorX:undefined,rightFootX:undefined,bodyGroundY:undefined,manualBodyAnchor:false})}
     images.clear();status("Background removed");renderAll();toast("Background removed","success");
   }
@@ -784,14 +808,22 @@
     if(state.frames.every((frame)=>frame.bodyAligned&&frame.alignmentMode===state.alignmentMode&&Number.isFinite(frame.bodyAnchorX)&&Number.isFinite(frame.rightFootX)&&Number.isFinite(frame.bodyGroundY)))return state.frames;
     return(await prepareHeadToFeetFrames(state.frames,{mode:state.alignmentMode})).frames;
   }
+  async function buildSheet(cols, size) {
+    const exportFrames=await framesForExport();
+    if (!exportFrames.length) throw new Error("Add frames before exporting.");
+    const rows=Math.ceil(exportFrames.length/cols),c=document.createElement("canvas");
+    if(size.w*cols>16384 || size.h*rows>16384 || size.w*cols*size.h*rows>64*1024*1024) throw new Error("Sprite sheet is too large. Reduce frame size or columns.");
+    c.width=size.w*cols;c.height=size.h*rows;
+    const x=c.getContext("2d");x.imageSmoothingEnabled=true;x.imageSmoothingQuality="high";
+    for(let i=0;i<exportFrames.length;i++)x.drawImage(await renderedFrame(exportFrames[i],size),i%cols*size.w,Math.floor(i/cols)*size.h);
+    return {canvas:c,metadata:metadata(cols,size,exportFrames)};
+  }
   async function exportSheet(){
     if(!state.frames.length)return;
-    const exportFrames=await framesForExport();
-    const cols=clamp(Number($("#exportColumns").value)||1,1,exportFrames.length),rows=Math.ceil(exportFrames.length/cols),size=exportFrameSize(),c=document.createElement("canvas");
-    c.width=size.w*cols;c.height=size.h*rows;
-    const x=c.getContext("2d");x.imageSmoothingEnabled=true;x.imageSmoothingQuality="high";status("Rendering high-quality sprite sheet…");
-    for(let i=0;i<exportFrames.length;i++)x.drawImage(await renderedFrame(exportFrames[i],size),i%cols*size.w,Math.floor(i/cols)*size.h);
-    const sheetBlob=await canvasBlob(c),sheetName=`${prefix()}_${size.w}px_${cols}x${rows}.png`,jsonBlob=new Blob([JSON.stringify(metadata(cols,size,exportFrames),null,2)],{type:"application/json"}),jsonName=`${prefix()}.json`,dir=await writableDefaultExportDirectory();
+    const cols=clamp(Number($("#exportColumns").value)||1,1,state.frames.length),rows=Math.ceil(state.frames.length/cols),size=exportFrameSize();
+    status("Rendering high-quality sprite sheet…");
+    const built=await buildSheet(cols,size),c=built.canvas;
+    const sheetBlob=await canvasBlob(c),sheetName=`${prefix()}_${size.w}px_${cols}x${rows}.png`,jsonBlob=new Blob([JSON.stringify(built.metadata,null,2)],{type:"application/json"}),jsonName=`${prefix()}.json`,dir=await writableDefaultExportDirectory();
     if(dir){await writeDirectoryFile(dir,sheetName,sheetBlob);await writeDirectoryFile(dir,jsonName,jsonBlob)}else{download(sheetBlob,sheetName);download(jsonBlob,jsonName)}
     $("#exportModal").classList.add("hidden");status("Sprite sheet exported");toast(`Exported ${c.width} × ${c.height} sprite sheet`,"success");
   }
@@ -834,6 +866,7 @@
     $("#autoBtn").onclick=$("#emptyAutoBtn").onclick=()=>$("#autoInput").click();
     $("#sheetBtn").onclick=$("#emptySheetBtn").onclick=()=>$("#sheetInput").click();
     $("#framesBtn").onclick=$("#emptyFramesBtn").onclick=$("#addFramesBtn").onclick=()=>$("#framesInput").click();
+    $("#videoBtn").onclick=importVideo;
     $("#autoInput").onchange=e=>{autoImport(e.target.files[0]);e.target.value=""};
     $("#sheetInput").onchange=e=>{openSlicer(e.target.files[0]);e.target.value=""};$("#framesInput").onchange=e=>{importFrames(e.target.files);e.target.value=""};
     $("#openBtn").onclick=()=>$("#projectInput").click();$("#projectInput").onchange=e=>{if(e.target.files[0])openProject(e.target.files[0]);e.target.value=""};
@@ -976,5 +1009,53 @@
     window.addEventListener("focus",restoreEditorFocus);
     document.addEventListener("visibilitychange",restoreEditorFocus);
   }
+  // Narrow service boundary. Adapters call these operations, never reproduce pixel processing.
+  window.SpritedCore = {
+    async dispatch(operation, args = {}) {
+      stop();
+      switch (operation) {
+        case "snapshot": return snapshot();
+        case "open": {
+          let pixels=0;
+          for(const f of args.project.frames){const image=await loadImage(f.src);pixels+=image.naturalWidth*image.naturalHeight;if(image.naturalWidth!==f.sourceWidth||image.naturalHeight!==f.sourceHeight||pixels>32*1024*1024)throw new Error("Invalid decoded frame dimensions or pixel budget exceeded");}
+          restore(args.project);state.history=[];state.future=[];return {frame_count:state.frames.length};
+        }
+        case "status": return {project:state.projectName,frame_count:state.frames.length,frame_size:[state.canvasWidth,state.canvasHeight],alignment:state.alignmentMode,duration_ms:state.frames.reduce((n,f)=>n+f.duration,0)};
+        case "frames": return state.frames.map(({src,...frame})=>frame);
+        case "extract": {
+          const video=document.createElement("video"),controller=new AbortController();video.muted=true;
+          try {
+            await SpritedVideo.waitFor(video,"loadeddata",controller.signal,()=>{video.src=args.url;video.load()});
+            const samples=await SpritedVideo.extract(video,args,controller.signal,()=>{});
+            await appendVideoSamples(samples,args.name,controller.signal);
+            return {imported:samples.length};
+          } finally {video.pause();video.removeAttribute("src");video.load()}
+        }
+        case "align": await normalize(args.mode || state.alignmentMode); return {aligned:state.frames.length};
+        case "normalize": state.alignmentMode=args.mode || state.alignmentMode; await fitAllToGuides(); return {normalized:state.frames.length,shared_scale:state.frames[0]?.scale};
+        case "remove-background": await removeBackground(true,args); return {processed:state.frames.length};
+        case "validate": {
+          const warnings=[],details=[];
+          const ref=reference() || state.frames[0];
+          if(!ref)return {warnings:["Animation contains no frames."],frames:[]};
+          const anchor=renderedAlignmentAnchor(ref,state.alignmentMode);
+          for(const f of state.frames){
+            const b=await alphaBounds(f.src),a=renderedAlignmentAnchor(f,state.alignmentMode),groundDelta=a.y-anchor.y;
+            if(b.empty)warnings.push(`${f.name}: empty frame`);
+            if(Math.abs(groundDelta)>2)warnings.push(`${f.name}: baseline differs by ${groundDelta.toFixed(2)}px`);
+            if(Math.abs(f.scale-ref.scale)>.001)warnings.push(`${f.name}: scale differs from reference`);
+            if(!f.bodyAligned)warnings.push(`${f.name}: alignment has not been applied`);
+            const bounds=renderedBodyBounds(f);
+            if(bounds.x<0||bounds.y<0||bounds.x+bounds.w>state.canvasWidth||bounds.y+bounds.h>state.canvasHeight)warnings.push(`${f.name}: body extends outside the output canvas`);
+            details.push({id:f.id,name:f.name,baseline_delta:groundDelta,scale:f.scale,empty:b.empty||false});
+          }
+          return {warnings,frames:details,checks:"Geometry only; does not judge anatomy or motion quality."};
+        }
+        case "build": { const built=await buildSheet(args.cols,{w:state.canvasWidth,h:state.canvasHeight});return {png:built.canvas.toDataURL("image/png"),metadata:built.metadata}; }
+        case "preview": {const frames=[];for(const f of state.frames)frames.push({src:(await renderedFrame(f)).toDataURL("image/png"),duration:f.duration});return {frames,loop:state.loop};}
+        default: throw new Error("Unsupported SPRITED operation");
+      }
+    }
+  };
   bind(); loadDefaultExportDirectory(); syncInputs(); renderAll();
 })();

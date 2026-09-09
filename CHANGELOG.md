@@ -1,5 +1,14 @@
 # SPRITED version history
 
+## 0.7.0 — local video and automation MVP
+
+- Added local animation-video import, trim range, frame count, bounded decoding, cancellation, and exact clip timing. Both GUI variants use the same video decoder.
+- Reused the portable editor's processing functions through `SpritedCore`; GUI sheet export and automation now share `buildSheet`.
+- Added CLI, authenticated loopback HTTP API and 12 stdio MCP tools, project manifests and persistent sessions.
+- Added geometry validation, local HTML preview and Godot 4 SpriteFrames export.
+- Kept version-1 sprite projects, manual offsets, body/right-foot alignment, and existing image import workflow.
+- This version consumes existing videos; generation and AI segmentation are not included.
+
 ## 0.6.10
 
 - Added `Align All Frames to Right Foot`, which locks the detected end of the right foot to the Reference Frame on both X and the ground line.

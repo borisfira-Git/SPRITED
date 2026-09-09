@@ -1,0 +1,6 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": { "incremental": false },
+  "include": ["../app/Sprited.tsx", "../public/video-import.d.ts"],
+  "exclude": ["../node_modules"]
+}

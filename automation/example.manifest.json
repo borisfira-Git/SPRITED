@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "character": "Guardian",
+  "animation": "walk",
+  "source_video": "source/walk.mp4",
+  "target_frames": 25,
+  "background": "#00ff00",
+  "alignment": "right_foot",
+  "frame_size": [256, 256]
+}

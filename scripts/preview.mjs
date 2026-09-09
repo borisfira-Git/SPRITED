@@ -7,6 +7,7 @@ const routes = {
   "/index.html": ["static/index.html", "text/html; charset=utf-8"],
   "/style.css": ["app/globals.css", "text/css; charset=utf-8"],
   "/app.js": ["static/app.js", "text/javascript; charset=utf-8"],
+  "/video-import.js": ["public/video-import.js", "text/javascript; charset=utf-8"],
   "/og.png": ["public/og.png", "image/png"],
 };
 
@@ -21,6 +22,6 @@ const server = createServer(async (request, response) => {
   response.end(await readFile(new URL(route[0], root)));
 });
 
-server.listen(4173, "127.0.0.1", () => {
-  console.log("http://127.0.0.1:4173");
+server.listen(Number(process.env.SPRITED_PORT || 4173), "127.0.0.1", () => {
+  console.log(`http://127.0.0.1:${server.address().port}`);
 });

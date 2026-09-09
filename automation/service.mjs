@@ -1,0 +1,145 @@
+import {readFile,writeFile,rename,mkdir,realpath,stat,unlink} from 'node:fs/promises';
+import path from 'node:path';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+import {randomUUID} from 'node:crypto';
+import {existsSync} from 'node:fs';
+import {validate} from './contracts.mjs';
+const appRoot=fileURLToPath(new URL('../',import.meta.url));
+export const envelope=(result={},warnings=[],output_paths=[])=>({success:true,result,warnings,errors:[],output_paths});
+export const failure=error=>({success:false,result:null,warnings:[],errors:[error.message||String(error)],output_paths:[]});
+export class Service {
+  constructor(root){this.root=path.resolve(root);this.tail=Promise.resolve();this.manifest={version:1,character:'Character',animation:'animation',source_video:null,target_frames:24,background:'#00ff00',alignment:'body',frame_size:[512,512]};}
+  async init(){
+    this.root=await realpath(this.root);
+    this.stateDir=await this.directory('.sprited');
+    this.lockPath=path.join(this.stateDir,'automation.lock');
+    try {await writeFile(this.lockPath,String(process.pid),{flag:'wx'});this.ownsLock=true;}catch(error){if(error.code==='EEXIST')throw new Error('This workspace is already in use by SPRITED automation. Use the running API/MCP session or close it first.');throw error;}
+    let module;try {module=await import('playwright-core');}catch(error){if(!process.env.SPRITED_PLAYWRIGHT)throw new Error('Run npm install in automation/ before using agents.');module=await import(pathToFileURL(process.env.SPRITED_PLAYWRIGHT).href);}
+    this.browser=await module.chromium.launch({channel:'msedge',headless:true});
+    this.page=await this.browser.newPage();
+    const source=existsSync(path.join(appRoot,'static/index.html'));
+    const assets={'/':[source?'static/index.html':'app/index.html','text/html'],'/style.css':[source?'app/globals.css':'app/style.css','text/css'],'/app.js':[source?'static/app.js':'app/app.js','text/javascript'],'/video-import.js':[source?'public/video-import.js':'app/video-import.js','text/javascript'],'/og.png':[source?'public/og.png':'app/og.png','image/png']};
+    await this.page.route('**/*',async route=>{
+      const u=new URL(route.request().url());
+      if(u.origin!=='http://sprited.local')return route.abort();
+      if(u.pathname==='/source-video'&&this.videoPath) {
+        const bytes=await readFile(this.videoPath),range=route.request().headers().range;
+        const match=range?.match(/^bytes=(\d+)-(\d*)$/);
+        const start=match?Number(match[1]):0,end=match&&match[2]?Math.min(Number(match[2]),bytes.length-1):bytes.length-1;
+        if(start>end)return route.fulfill({status:416,body:''});
+        const headers={'accept-ranges':'bytes','content-type':path.extname(this.videoPath).toLowerCase()==='.webm'?'video/webm':'video/mp4'};
+        if(match)headers['content-range']=`bytes ${start}-${end}/${bytes.length}`;
+        return route.fulfill({status:match?206:200,headers,body:bytes.subarray(start,end+1)});
+      }
+      const asset=assets[u.pathname];if(!asset)return route.fulfill({status:404,body:''});
+      return route.fulfill({contentType:asset[1],body:await readFile(path.join(appRoot,asset[0]))});
+    });
+    await this.page.goto('http://sprited.local/');
+    try {
+      const session=JSON.parse(await readFile(await this.input('.sprited/session.json',['.json'],110*1024*1024),'utf8'));
+      await this.openProject(session.project);this.manifest={...this.manifest,...this.safeManifest(session.manifest)};
+      if(this.manifest.source_video)this.videoPath=await this.input(this.manifest.source_video,['.mp4','.webm','.mov'],250*1024*1024);
+    }catch(error){if(error.code!=='ENOENT')throw error;}
+    return this;
+  }
+  contained(target){const rel=path.relative(this.root,target);if(rel==='..'||rel.startsWith('..'+path.sep)||path.isAbsolute(rel))throw new Error('Path is outside the configured workspace');return target;}
+  async input(value,extensions,max){const target=this.contained(await realpath(this.contained(path.resolve(this.root,value))));if(!extensions.includes(path.extname(target).toLowerCase()))throw new Error('Unsupported file type');const info=await stat(target);if(!info.isFile()||info.size>max)throw new Error('File is too large or is not a regular file');return target;}
+  async directory(value){
+    const target=this.contained(path.resolve(this.root,value));let current=this.root;
+    for(const segment of path.relative(this.root,target).split(path.sep).filter(Boolean)){
+      current=path.join(current,segment);try {current=this.contained(await realpath(current));}catch(e){if(e.code!=='ENOENT')throw e;await mkdir(current);current=this.contained(await realpath(current));}
+    }return current;
+  }
+  safeManifest(m){
+    if(!m||typeof m!=='object')throw new Error('Invalid manifest');
+    const result={};for(const key of ['character','animation','source_video','target_frames','background','alignment','frame_size'])if(key in m)result[key]=m[key];
+    for(const key of ['character','animation'])if(key in result&&(typeof result[key]!=='string'||result[key].length>120))throw new Error(`Invalid manifest ${key}`);
+    if(result.source_video!=null&&typeof result.source_video!=='string')throw new Error('Invalid source_video');
+    if(result.target_frames!=null&&(!Number.isInteger(result.target_frames)||result.target_frames<1||result.target_frames>120))throw new Error('Invalid target_frames');
+    if(result.background&&!/^#[0-9a-f]{6}$/i.test(result.background))throw new Error('Invalid background');
+    if(result.alignment&&!['body','rightFoot','right_foot'].includes(result.alignment))throw new Error('Invalid alignment');
+    if(result.frame_size&&(!Array.isArray(result.frame_size)||result.frame_size.length!==2||result.frame_size.some(n=>!Number.isInteger(n)||n<16||n>4096)))throw new Error('Invalid frame_size');
+    return result;
+  }
+  async core(operation,args={}){return this.page.evaluate(({operation,args})=>window.SpritedCore.dispatch(operation,args),{operation,args});}
+  async openProject(data){
+    if(!data||data.version!==1||!Array.isArray(data.frames)||data.frames.length>120)throw new Error('Invalid project format or more than 120 frames');
+    if(![data.canvasWidth,data.canvasHeight].every(n=>Number.isInteger(n)&&n>=16&&n<=4096))throw new Error('Invalid canvas dimensions');
+    let pixels=0;
+    for(const f of data.frames){
+      if(typeof f.id!=='string'||! /^[a-zA-Z0-9_-]{1,120}$/.test(f.id))throw new Error('Invalid frame id');
+      if(typeof f.src!=='string'||!/^data:image\/(png|webp);base64,[A-Za-z0-9+/=]+$/.test(f.src))throw new Error('Projects may only contain embedded PNG/WebP frames');
+      for(const key of ['x','y','scale','rotation','duration','sourceWidth','sourceHeight'])if(!Number.isFinite(f[key])||Math.abs(f[key])>1e6)throw new Error(`Invalid frame ${key}`);
+      if(f.scale<=0||f.duration<=0)throw new Error('Invalid scale or duration');
+      for(const key of ['charBounds','alphaBounds'])if(!f[key]||!['x','y','w','h'].every(k=>Number.isFinite(f[key][k])))throw new Error('Invalid frame bounds');
+      pixels+=f.sourceWidth*f.sourceHeight;
+    }
+    if(pixels>32*1024*1024)throw new Error('Project exceeds the automation pixel budget');
+    const safe={};for(const key of ['version','projectName','frames','selectedId','selectedIds','selectionAnchorId','referenceId','canvasWidth','canvasHeight','groundRatio','anchorRatio','targetHeightRatio','rulerBottomRatio','alignmentMode','fps','loop'])if(key in data)safe[key]=data[key];
+    await this.core('open',{project:safe});
+  }
+  async persist(){
+    const project=await this.core('snapshot');
+    const target=path.join(this.stateDir,'session.json');
+    // Validate existing destination too; never follow a replacement symlink.
+    try {this.contained(await realpath(target));}catch(e){if(e.code!=='ENOENT')throw e;}
+    const temp=path.join(this.stateDir,`${randomUUID()}.tmp`);
+    await writeFile(temp,JSON.stringify({manifest:this.manifest,project}),{flag:'wx'});await rename(temp,target);
+  }
+  call(action,args={}){const run=this.tail.then(()=>this.execute(action,args));this.tail=run.catch(()=>{});return run;}
+  async execute(action,args){
+    let before,oldManifest,oldVideo;
+    try {
+      validate(action,args);before=await this.core('snapshot');oldManifest=structuredClone(this.manifest);oldVideo=this.videoPath;
+      let result,outputs=[];
+      const mode=(args.mode||this.manifest.alignment)==='right_foot'?'rightFoot':args.mode||this.manifest.alignment;
+      if(action==='project/open'){
+        const file=await this.input(args.path,['.json','.spriteproject'],110*1024*1024),data=JSON.parse(await readFile(file,'utf8'));
+        if(Array.isArray(data.frames)) {await this.openProject(data);this.manifest={...this.manifest,animation:data.projectName,source_video:null,frame_size:[data.canvasWidth,data.canvasHeight],alignment:data.alignmentMode||'body'};this.videoPath=null;}
+        else {
+          this.manifest={...this.manifest,...this.safeManifest(data)};
+          if(data.project_file){const project=await this.input(path.resolve(path.dirname(file),data.project_file),['.spriteproject'],110*1024*1024);await this.openProject(JSON.parse(await readFile(project,'utf8')));}
+          else {await this.openProject({version:1,projectName:this.manifest.animation,frames:[],selectedId:null,referenceId:null,canvasWidth:this.manifest.frame_size[0],canvasHeight:this.manifest.frame_size[1],fps:12,loop:true,groundRatio:.88,alignmentMode:this.manifest.alignment==='right_foot'?'rightFoot':this.manifest.alignment});}
+          this.videoPath=this.manifest.source_video?await this.input(path.resolve(path.dirname(file),this.manifest.source_video),['.mp4','.webm','.mov'],250*1024*1024):null;
+          this.manifest.source_video=this.videoPath?path.relative(this.root,this.videoPath):null;
+        }result=await this.core('status');
+      } else if(action==='video/import'){
+        this.videoPath=await this.input(args.path,['.mp4','.webm','.mov'],250*1024*1024);this.manifest.source_video=path.relative(this.root,this.videoPath);result={source_video:this.manifest.source_video};
+      } else if(action==='video/extract'){
+        if(!this.videoPath)throw new Error('Import a video first');
+        this.videoPath=await this.input(this.videoPath,['.mp4','.webm','.mov'],250*1024*1024);
+        if(before.frames.length+args.frames>120)throw new Error('Maximum 120 frames per automation project');
+        result=await this.core('extract',{url:'http://sprited.local/source-video?'+randomUUID(),name:path.basename(this.videoPath),start:args.start,end:args.end,count:args.frames,maxSize:args.max_size||512});this.manifest.target_frames=args.frames;
+      } else if(action==='frames/align'||action==='frames/normalize'){
+        result=await this.core(action.split('/')[1],{mode});this.manifest.alignment=mode;
+      } else if(action==='frames/remove-background'){
+        const settings={color:args.color||this.manifest.background,tolerance:args.tolerance??52,softness:args.softness??12};result=await this.core('remove-background',settings);this.manifest.background=settings.color;
+      } else if(action==='animation/validate')result=await this.core('validate');
+      else if(action==='frames/get')result=await this.core('frames');
+      else if(action==='status')result={...await this.core('status'),manifest:this.manifest};
+      else if(action==='animation/preview'){
+        const preview=await this.core('preview');if(!preview.frames.length)throw new Error('No frames to preview');
+        const dir=await this.directory(`exports/${randomUUID()}`),file=path.join(dir,'preview.html');
+        const json=JSON.stringify(preview).replace(/</g,'\\u003c');
+        await writeFile(file,`<!doctype html><meta charset="utf-8"><title>SPRITED animation preview</title><style>body{background:#28221e;color:white;font:16px system-ui;text-align:center}img{max-width:90vw;background:repeating-conic-gradient(#444 0 25%,#666 0 50%) 0/20px 20px}</style><h1>Animation preview</h1><img id="frame"><p id="count"></p><button id="toggle">Pause</button><script>const data=${json};let i=0,playing=true;const image=document.getElementById('frame'),label=document.getElementById('count');function tick(){image.src=data.frames[i].src;label.textContent=(i+1)+' / '+data.frames.length;setTimeout(()=>{if(playing){if(i<data.frames.length-1)i++;else if(data.loop)i=0;else playing=false;}tick()},data.frames[i].duration)}document.getElementById('toggle').onclick=e=>{playing=!playing;e.target.textContent=playing?'Pause':'Play'};tick();</script>`,{flag:'wx'});outputs=[file];result={frame_count:preview.frames.length};
+      } else {
+        const built=await this.core('build',{cols:args.cols||5});
+        const dir=await this.directory(path.join(args.folder||'exports',`sprited-${randomUUID()}`));
+        const png=path.join(dir,'spritesheet.png'),json=path.join(dir,'spritesheet.json');
+        await writeFile(png,Buffer.from(built.png.split(',')[1],'base64'),{flag:'wx'});await writeFile(json,JSON.stringify(built.metadata,null,2),{flag:'wx'});outputs=[png,json];
+        const projectFile=path.join(dir,'project.spriteproject'),manifestFile=path.join(dir,'manifest.json');
+        await writeFile(projectFile,JSON.stringify(await this.core('snapshot')),{flag:'wx'});
+        await writeFile(manifestFile,JSON.stringify({...this.manifest,project_file:'project.spriteproject',source_video:this.videoPath?path.relative(dir,this.videoPath):null},null,2),{flag:'wx'});
+        outputs.push(projectFile,manifestFile);
+        if(action==='export/godot'){
+          const m=built.metadata,sections=[];for(let i=0;i<m.frames;i++)sections.push(`[sub_resource type="AtlasTexture" id="Atlas_${i}"]\natlas = ExtResource("1")\nregion = Rect2(${i%m.horizontal_frames*m.frame_width}, ${Math.floor(i/m.horizontal_frames)*m.frame_height}, ${m.frame_width}, ${m.frame_height})`);
+          const resource=`[gd_resource type="SpriteFrames" load_steps=${m.frames+2} format=3]\n\n[ext_resource type="Texture2D" path="spritesheet.png" id="1"]\n\n${sections.join('\n\n')}\n\n[resource]\nanimations = [{\n"frames": [${m.durations_ms.map((d,i)=>`{"duration": ${d/1000}, "texture": SubResource("Atlas_${i}")}`).join(',')}],\n"loop": ${m.loop},\n"name": ${JSON.stringify(this.manifest.animation)},\n"speed": 1.0\n}]\n`;
+          const file=path.join(dir,'animation.tres');await writeFile(file,resource,{flag:'wx'});outputs.push(file);
+        }result=built.metadata;
+      }
+      if(!['status','frames/get','animation/validate','animation/preview','spritesheet/build','export/godot'].includes(action))await this.persist();
+      return envelope(result,result?.warnings||[],outputs);
+    }catch(error){if(before){await this.core('open',{project:before}).catch(()=>{});this.manifest=oldManifest;this.videoPath=oldVideo;}return failure(error);}
+  }
+  async close(){await this.tail;await this.browser?.close();if(this.ownsLock){await unlink(this.lockPath);this.ownsLock=false;}}
+}

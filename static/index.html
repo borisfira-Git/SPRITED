@@ -13,7 +13,7 @@
 <body>
 <div class="app-shell">
   <header class="topbar">
-    <div class="brand"><div class="brand-mark"><span></span><span></span><span></span><span></span></div><div class="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div><span class="version-badge">VER.0.6.10</span></div>
+    <div class="brand"><div class="brand-mark"><span></span><span></span><span></span><span></span></div><div class="brand-copy"><strong>SPRITED</strong><small>Sprite Sheet Studio</small></div><span class="version-badge">VER.0.7.0</span></div>
     <div class="project-title"><input id="projectName" value="Untitled Animation" aria-label="Project name"><span id="saveState">Local project</span></div>
     <nav class="toolbar">
       <button id="newBtn">＋ New</button><button id="openBtn">⌁ Open</button><button id="saveBtn">↓ Save</button><i></i>
@@ -28,6 +28,7 @@
         <button id="autoBtn" class="auto-import"><span>✦</span><div><strong>Auto Import</strong><small>Detect frames + remove background</small></div><em>AUTO</em></button>
         <button id="sheetBtn"><span>▦</span><div><strong>Sprite Sheet</strong><small>Slice rows & columns</small></div></button>
         <button id="framesBtn"><span>◇</span><div><strong>Separate Frames</strong><small>Add PNG images</small></div></button>
+        <button id="videoBtn"><span>▷</span><div><strong>Animation Video</strong><small>Extract frames from a local clip</small></div></button>
       </div>
       <div class="list-tools"><button id="firstBtn">First</button><button id="reverseBtn">Reverse</button><button id="duplicateBtn">Duplicate</button></div>
       <div id="framesList" class="frames-list"></div>
@@ -136,6 +137,7 @@
 <input id="sheetInput" hidden type="file" accept="image/png,image/webp">
 <input id="framesInput" hidden multiple type="file" accept="image/png,image/webp">
 <input id="projectInput" hidden type="file" accept=".spriteproject,.json">
+<script src="./video-import.js"></script>
 <script src="./app.js"></script>
 </body>
 </html>
