@@ -29,7 +29,7 @@ export class LocalProcessProvider extends ImageProvider {
     if(!this.config.enabled)throw Error('Local process provider is not configured or enabled');
     if(typeof this.config.executable!=='string'||!this.config.executable)throw Error('Local process executable is not configured');
     if(!Array.isArray(this.config.arguments||[])||(this.config.arguments||[]).some(value=>typeof value!=='string'||value.length>4096))throw Error('Invalid local process arguments');
-    const timeout=this.config.timeout_ms??15000;if(!Number.isInteger(timeout)||timeout<100||timeout>60000)throw Error('Local process timeout must be 100–60000 ms');
+    const timeout=this.config.timeout_ms??15000;if(!Number.isInteger(timeout)||timeout<100||timeout>1800000)throw Error('Local process timeout must be 100–1800000 ms');
     let executable;try{executable=await realpath(this.config.executable);const info=await stat(executable);if(!info.isFile())throw Error();}catch{throw Error('Local process executable was not found');}
     let script=null;if(this.config.script!==undefined){if(typeof this.config.script!=='string'||!this.config.script)throw Error('Invalid local process script');try{script=await realpath(this.config.script);const info=await stat(script);if(!info.isFile())throw Error();}catch{throw Error('Local process script was not found');}}
     if(!this.tempRoot||!this.assetResolver)throw Error('Local process provider runtime is unavailable');await mkdir(this.tempRoot,{recursive:true});const directory=await mkdtemp(path.join(this.tempRoot,'request-'));

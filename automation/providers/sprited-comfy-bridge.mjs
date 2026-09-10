@@ -22,7 +22,7 @@ async function uploadAssets(endpoint,request,directory,deadline){
 
 export async function runBridge(configPath,requestPath){
   let config,request;try{config=JSON.parse(await readFile(configPath,'utf8'));request=JSON.parse(await readFile(requestPath,'utf8'));}catch{throw Error('Invalid bridge configuration or request JSON');}
-  const endpoint=localEndpoint(config.endpoint||'http://127.0.0.1:8188'),timeout=config.timeout_ms??55000;if(!Number.isInteger(timeout)||timeout<100||timeout>60000)throw Error('Bridge timeout must be 100–60000 ms');const deadline=Date.now()+timeout,directory=path.dirname(requestPath);
+  const endpoint=localEndpoint(config.endpoint||'http://127.0.0.1:8188'),timeout=config.timeout_ms??55000;if(!Number.isInteger(timeout)||timeout<100||timeout>1800000)throw Error('Bridge timeout must be 100–1800000 ms');const deadline=Date.now()+timeout,directory=path.dirname(requestPath);
   const health=await fetchWithin(endpoint+'/system_stats',{},deadline);if(!health.ok)throw Error('ComfyUI is not reachable');
   const workflowPath=request.operation==='edit_frame'?config.edit_workflow:config.generate_workflow;if(typeof workflowPath!=='string'||!workflowPath)throw Error(`Missing ${request.operation==='edit_frame'?'edit':'generate'} workflow file`);
   let workflow;try{const parsed=JSON.parse(await readFile(path.resolve(path.dirname(configPath),workflowPath),'utf8'));workflow=parsed.prompt||parsed;if(!workflow||typeof workflow!=='object'||Array.isArray(workflow))throw Error();}catch{throw Error('Invalid ComfyUI workflow file');}
