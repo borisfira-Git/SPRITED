@@ -8,7 +8,7 @@ test('normalizes passing frame semantic validation',async()=>{
   assert.equal(result.passed,true);assert.equal(result.semantic_score,94);assert.equal(result.frame_id,'frame-1');assert.deepEqual(result.bad_frames,[]);
 });
 test('normalizes animation issues and bad frame indexes',async()=>{
-  const result=await provider.validate_animation({animation_id:'animation-1',max_frame_index:7,supervisor_result:{passed:false,score:42,issues:[{type:'leg_progression',frame_index:5,severity:'high',description:'The same leg remains forward.'}]}});
+  const result=await provider.validate_animation({animation_id:'animation-1',max_frame_index:7,supervisor_result:{passed:false,score:42,issues:[{type:'leg_progression',frame_index:5,severity:'high',description:'The same leg remains forward.'}],bad_frames:[5]}});
   assert.equal(result.passed,false);assert.deepEqual(result.bad_frames,[5]);
 });
 test('rejects invalid semantic results',async()=>{

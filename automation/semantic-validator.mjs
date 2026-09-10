@@ -16,7 +16,8 @@ const normalize=(result,{animation_id,frame_id,maxFrameIndex,source='external_ma
   if(typeof result.passed!=='boolean'||!Number.isInteger(result.score)||result.score<0||result.score>100||!Array.isArray(result.issues))throw Error('Invalid semantic validation result');
   const issues=result.issues.map(issue=>normalizeIssue(issue,maxFrameIndex));
   if(result.passed&&issues.some(issue=>issue.severity==='high'))throw Error('A passing semantic result cannot contain high-severity issues');
-  return {validation_id:randomUUID(),animation_id,...(frame_id?{frame_id}:{}),provider:source,semantic_score:result.score,passed:result.passed,issues,bad_frames:[...new Set(issues.filter(issue=>issue.frame_index!==undefined).map(issue=>issue.frame_index))].sort((a,b)=>a-b),created_at:new Date().toISOString()};
+  const badFrames=[...new Set(issues.filter(issue=>issue.frame_index!==undefined).map(issue=>issue.frame_index))].sort((a,b)=>a-b),submitted=result.bad_frames?[...new Set(result.bad_frames)].sort((a,b)=>a-b):badFrames;if(submitted.length!==badFrames.length||submitted.some((value,index)=>value!==badFrames[index]))throw Error('bad_frames must match frame-specific semantic issues');
+  return {validation_id:randomUUID(),animation_id,...(frame_id?{frame_id}:{}),provider:source,semantic_score:result.score,passed:result.passed,issues,bad_frames:badFrames,created_at:new Date().toISOString()};
 };
 
 export class VisionSupervisor {
