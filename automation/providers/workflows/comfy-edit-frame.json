@@ -1,0 +1,109 @@
+{
+  "1": {
+    "class_type": "CheckpointLoaderSimple",
+    "inputs": {
+      "ckpt_name": "dreamshaper_8.safetensors"
+    }
+  },
+  "2": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "{{current_frame}}"
+    }
+  },
+  "3": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "{{reference_image}}"
+    }
+  },
+  "4": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "{{previous_frame}}"
+    }
+  },
+  "5": {
+    "class_type": "LoadImage",
+    "inputs": {
+      "image": "{{next_frame}}"
+    }
+  },
+  "6": {
+    "class_type": "ImageBlend",
+    "inputs": {
+      "image1": ["2", 0],
+      "image2": ["3", 0],
+      "blend_factor": 0.08,
+      "blend_mode": "normal"
+    }
+  },
+  "7": {
+    "class_type": "ImageBlend",
+    "inputs": {
+      "image1": ["6", 0],
+      "image2": ["4", 0],
+      "blend_factor": 0.06,
+      "blend_mode": "normal"
+    }
+  },
+  "8": {
+    "class_type": "ImageBlend",
+    "inputs": {
+      "image1": ["7", 0],
+      "image2": ["5", 0],
+      "blend_factor": 0.06,
+      "blend_mode": "normal"
+    }
+  },
+  "9": {
+    "class_type": "VAEEncode",
+    "inputs": {
+      "pixels": ["8", 0],
+      "vae": ["1", 2]
+    }
+  },
+  "10": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["1", 1],
+      "text": "Repair only this 2D game sprite animation frame. Preserve the exact character identity, face, hairstyle, outfit, armor, colors, equipment, facing direction, scale, framing and art style. Match the motion before and after this frame. {{instruction}} Animation: {{animation_type}}. Animation id: {{animation_id}}. Frame index: {{frame_index}}."
+    }
+  },
+  "11": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": ["1", 1],
+      "text": "different character, changed face, changed outfit, missing equipment, extra weapon, duplicate limbs, extra fingers, mirrored direction, scale change, camera change, crop, text, watermark, logo, busy background, blur, low quality"
+    }
+  },
+  "12": {
+    "class_type": "KSampler",
+    "inputs": {
+      "seed": "{{frame_index}}",
+      "steps": 20,
+      "cfg": 6.5,
+      "sampler_name": "dpmpp_2m",
+      "scheduler": "karras",
+      "denoise": 0.28,
+      "model": ["1", 0],
+      "positive": ["10", 0],
+      "negative": ["11", 0],
+      "latent_image": ["9", 0]
+    }
+  },
+  "13": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": ["12", 0],
+      "vae": ["1", 2]
+    }
+  },
+  "14": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "{{output_filename}}",
+      "images": ["13", 0]
+    }
+  }
+}
