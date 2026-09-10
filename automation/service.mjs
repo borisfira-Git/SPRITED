@@ -7,7 +7,7 @@ import {validate} from './contracts.mjs';
 import {diagnostics} from './diagnostics.mjs';
 import {Connections} from './connections.mjs';
 import {acquireLock,releaseLock} from './lock.mjs';
-import {ExternalManualProvider,LocalProcessProvider} from './image-provider.mjs';
+import {ExternalManualProvider,LocalProcessProvider,ChatGPTAssistedProvider} from './image-provider.mjs';
 import {validateAnimation,detectBadFrames} from './animation-validator.mjs';
 import {encodeGif} from './gif-encoder.mjs';
 import {ExternalManualVisionProvider,combineValidation} from './semantic-validator.mjs';
@@ -22,7 +22,7 @@ const compactAgentResult=value=>{
   return result;
 };
 export class Service {
-  constructor(root){this.root=path.resolve(root);this.tail=Promise.resolve();this.defaultImageProvider='external_manual';this.imageProviders={external_manual:new ExternalManualProvider()};this.visionProviders={external_manual:new ExternalManualVisionProvider()};this.manifest={version:1,character:'Character',animation:'animation',source_video:null,target_frames:24,background:'#00ff00',alignment:'body',frame_size:[512,512]};}
+  constructor(root){this.root=path.resolve(root);this.tail=Promise.resolve();this.defaultImageProvider='external_manual';this.imageProviders={external_manual:new ExternalManualProvider(),chatgpt_assisted:new ChatGPTAssistedProvider()};this.visionProviders={external_manual:new ExternalManualVisionProvider()};this.manifest={version:1,character:'Character',animation:'animation',source_video:null,target_frames:24,background:'#00ff00',alignment:'body',frame_size:[512,512]};}
   async init(){
     this.root=await realpath(this.root);
     this.stateDir=await this.directory('.sprited');
@@ -60,7 +60,7 @@ export class Service {
   }
   async configureImageProviders(){
     let config={default_provider:'external_manual',providers:{local_process:{enabled:false}}};try{const file=await this.input('.sprited/image-providers.json',['.json'],64*1024);config=JSON.parse(await readFile(file,'utf8'));}catch(error){if(error.code!=='ENOENT')throw Error('Invalid image provider configuration');}
-    if(!['external_manual','local_process'].includes(config.default_provider)||!config.providers||typeof config.providers!=='object')throw Error('Invalid image provider configuration');this.defaultImageProvider=config.default_provider;
+    if(!['external_manual','local_process','chatgpt_assisted'].includes(config.default_provider)||!config.providers||typeof config.providers!=='object')throw Error('Invalid image provider configuration');this.defaultImageProvider=config.default_provider;
     this.imageProviders.local_process=new LocalProcessProvider(config.providers.local_process||{enabled:false},{tempRoot:await this.directory('.sprited/provider-tmp'),assetResolver:reference=>this.readContentReference(reference)});
   }
   contained(target){const rel=path.relative(this.root,target);if(rel==='..'||rel.startsWith('..'+path.sep)||path.isAbsolute(rel))throw new Error('Path is outside the configured workspace');return target;}
@@ -113,7 +113,7 @@ export class Service {
     if(replace&&!previous)throw Error('Frame not found');
     const providerId=args.provider||run.image_provider_id||this.defaultImageProvider,provider=this.imageProviders[providerId];if(!provider)throw Error('Unknown image provider');
     const frameIndex=previous?.frame_index??args.frame_index,prior=records.find(frame=>frame.frame_index===frameIndex-1),next=records.find(frame=>frame.frame_index===frameIndex+1),reference=`character:${run.character_profile_id}`,current=previous?`frame:${previous.frame_id}`:null,priorRef=prior?`frame:${prior.frame_id}`:null,nextRef=next?`frame:${next.frame_id}`:null;
-    const request=providerId==='external_manual'?args:{animation_id:run.id,frame_index:frameIndex,animation_type:run.animation_type,reference_asset:reference,previous_frame:priorRef,next_frame:nextRef,current_frame:current,repair_reasons:args.repair_reasons||[],instruction:args.instruction,assets:{reference,current,previous:priorRef,next:nextRef}};
+    const request=['external_manual','chatgpt_assisted'].includes(providerId)?args:{animation_id:run.id,frame_index:frameIndex,animation_type:run.animation_type,reference_asset:reference,previous_frame:priorRef,next_frame:nextRef,current_frame:current,repair_reasons:args.repair_reasons||[],instruction:args.instruction,assets:{reference,current,previous:priorRef,next:nextRef}};
     const normalized=await provider[replace?'edit_frame':'generate_frame'](request),src=`data:${normalized.mime_type};base64,${normalized.bytes.toString('base64')}`;
     const dimensions=await this.page.evaluate(source=>new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve({width:image.naturalWidth,height:image.naturalHeight});image.onerror=()=>reject(Error('Image could not be decoded'));image.src=source;}),src);
     if(dimensions.width*dimensions.height>4*1024*1024)throw Error('Frame exceeds 4 megapixels');
@@ -195,6 +195,11 @@ export class Service {
       if(action==='agent/submit-frame'){result=await this.storeProviderFrame(args,false);return {...envelope(result),status:'stored',next_suggested_action:'Submit the next frame or call list_frames.'};}
       if(action==='agent/replace-frame'){result=await this.storeProviderFrame(args,true);return {...envelope(result),status:'replaced',next_suggested_action:'Call list_frames to verify the sequence.'};}
       if(action==='agent/list-frames')return envelope(await this.core('workflow/animation/list-frames',{id:args.animation_id}));
+      if(action==='agent/prepare-assisted-request'){
+        const run=await this.core('workflow/animation/status',{id:args.animation_id});let plan=null;
+        if(args.repair_plan_id){const found=await this.core('workflow/repair/find',{id:args.repair_plan_id});if(found.animation_id!==run.id)throw Error('Repair plan belongs to another animation');plan=found.plan;}
+        const operation=plan?'prepare_repair_request':'prepare_generate_request';return {...envelope(this.imageProviders.chatgpt_assisted[operation]({run,frameIndex:args.frame_index,repairPlan:plan,instruction:args.instruction})),status:'prepared',next_suggested_action:'Open the referenced assets, generate one image manually in ChatGPT, then import it with submit_frame or submit_repair_frame.'};
+      }
       if(action==='agent/build-gif'){result=await this.buildGifPreview(args);return {...envelope(result),status:'ready'};}
       if(action==='agent/validate-animation'){result=await this.runTechnicalValidation(args.animation_id);return {...envelope(result),status:result.passed?'passed':'issues_found'};}
       if(action==='agent/detect-bad-frames'){const run=await this.core('workflow/animation/status',{id:args.animation_id}),validation=run.technical_validation||await this.runTechnicalValidation(args.animation_id);return envelope(detectBadFrames(validation));}

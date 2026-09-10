@@ -32,10 +32,18 @@ export async function serve(service,port=47821,token=process.env.SPRITED_TOKEN||
         const dir=await service.directory('.sprited/uploads'),file=path.join(dir,randomUUID()+(req.headers['content-type']==='image/png'?'.png':'.webp'));await writeFile(file,Buffer.concat(chunks),{flag:'wx'});
         const result=await service.call(url.searchParams.get('replace')?'character/replace-reference':'character/create',{path:file,name:url.searchParams.get('name')||'Character',...(url.searchParams.get('replace')?{id:url.searchParams.get('replace')}:{})});res.writeHead(result.success?200:400);res.end(JSON.stringify(result));return;
       }
+      if(url.pathname==='/ui/assisted-import'&&req.method==='POST'){
+        const format=req.headers['content-type']==='image/webp'?'webp':req.headers['content-type']==='image/png'?'png':null;if(!format)throw Error('PNG/WebP required');
+        let size=0,chunks=[];for await(const chunk of req){size+=chunk.length;if(size>9*1024*1024)throw Error('Frame image is too large');chunks.push(chunk);}
+        const repairPlanId=url.searchParams.get('repair_plan_id'),frameIndex=Number(url.searchParams.get('frame_index')),animationId=url.searchParams.get('animation_id');
+        const result=await service.call(repairPlanId?'agent/submit-repair-frame':'agent/submit-frame',{...(repairPlanId?{repair_plan_id:repairPlanId}:{animation_id:animationId}),frame_index:frameIndex,provider:'chatgpt_assisted',format,image_base64:Buffer.concat(chunks).toString('base64')});res.writeHead(result.success?200:400);res.end(JSON.stringify(result));return;
+      }
       const media=url.pathname.match(/^\/attempts\/([a-zA-Z0-9_-]+)\/video$/);
       if(media&&req.method==='GET'){const r=await service.call('animation/status',{id:media[1]});if(!r.success||!r.result.source_video_path)throw Error('No video result');const file=await service.input(r.result.source_video_path,['.mp4','.webm','.mov'],250*1024*1024);res.setHeader('content-type',file.endsWith('.webm')?'video/webm':'video/mp4');res.end(await readFile(file));return;}
       const frame=url.pathname.match(/^\/attempts\/([a-zA-Z0-9_-]+)\/frames\/(\d+)$/);
       if(frame&&req.method==='GET'){const r=await service.call('animation/status',{id:frame[1]}),candidate=r.result?.source_frame_paths?.[Number(frame[2])];if(!r.success||!candidate)throw Error('No animation frame');const file=await service.input(candidate,['.png','.webp'],9*1024*1024);res.setHeader('content-type',file.endsWith('.webp')?'image/webp':'image/png');res.end(await readFile(file));return;}
+      const storedFrame=url.pathname.match(/^\/frames\/([a-zA-Z0-9_-]+)\/asset$/);
+      if(storedFrame&&req.method==='GET'){const asset=await service.readContentReference(`frame:${storedFrame[1]}`);res.setHeader('content-type',asset.mime_type);res.end(asset.bytes);return;}
       const route=new URL(req.url,'http://127.0.0.1').pathname.slice(1);
       const aliases={'character':'character/show','character/reference':'character/set-reference','recipes':'recipes/list','providers':'providers/list','characters':req.method==='GET'?'character/list':'character/create','generation-jobs':req.method==='GET'?'jobs/list':'jobs/create','attempts':'attempts/list','trash':'character/trash'};
       let action=Object.hasOwn(aliases,route)?aliases[route]:route;

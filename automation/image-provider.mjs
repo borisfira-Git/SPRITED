@@ -1,6 +1,7 @@
 import {spawn} from 'node:child_process';
 import {mkdir,mkdtemp,writeFile,readFile,realpath,stat,rm} from 'node:fs/promises';
 import path from 'node:path';
+import {prepareAssistedRequest} from './chatgpt-assisted.mjs';
 
 const normalizeBytes=(bytes,format,provider)=>{
   if(!['png','webp'].includes(format))throw Error('Frame format must be png or webp');
@@ -17,10 +18,16 @@ export class ImageProvider {
 }
 
 export class ExternalManualProvider extends ImageProvider {
-  constructor(){super('external_manual');}
+  constructor(id='external_manual'){super(id);}
   normalize({image_base64,format}){if(typeof image_base64!=='string'||!image_base64.length||image_base64.length>12*1024*1024)throw Error('Frame image is missing or too large');return normalizeBytes(Buffer.from(image_base64,'base64'),format,this.id);}
   async generate_frame(request){return this.normalize(request);}
   async edit_frame(request){return this.normalize(request);}
+}
+
+export class ChatGPTAssistedProvider extends ExternalManualProvider {
+  constructor(){super('chatgpt_assisted');}
+  prepare_generate_request(context){return prepareAssistedRequest({...context,repairPlan:null});}
+  prepare_repair_request(context){return prepareAssistedRequest(context);}
 }
 
 export class LocalProcessProvider extends ImageProvider {
