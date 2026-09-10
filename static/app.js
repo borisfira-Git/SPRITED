@@ -1085,6 +1085,7 @@
     }
     if(action==='animation/list')return result(w.animation_runs.map(({editor_snapshot,...r})=>r));
     if(action==='animation/create') {commit();return W.create(w,args.animation_type);}
+    if(action==='character/find'){const character=w.characters.find(item=>item.id===args.id);if(!character)throw Error('Character not found');return result(character);}
     if(action==='frame/find'){
       for(const run of w.animation_runs){const frame=(run.frame_records||[]).find(item=>item.frame_id===args.id);if(frame)return result(frame);}
       throw Error('Frame not found');
@@ -1092,6 +1093,10 @@
     if(action==='asset/find'){
       for(const run of w.animation_runs){const asset=(run.contact_sheets||[]).find(item=>item.contact_sheet_id===args.id);if(asset)return result(asset);}
       throw Error('Contact sheet not found');
+    }
+    if(action==='repair/find'){
+      for(const run of w.animation_runs){const plan=(run.repair_plans||[]).find(item=>item.repair_plan_id===args.id);if(plan)return result({animation_id:run.id,plan});}
+      throw Error('Repair plan not found');
     }
     const r=W.get(w,args.id);
     if(r.job_id&&['animation/attach-video','animation/submit-result'].includes(action))throw Error('Use jobs/submit-result and an active claim token for a queued job');
@@ -1107,7 +1112,10 @@
     if(action==='animation/record-validation'){r.technical_validation=structuredClone(args.validation);if(args.combined)r.combined_validation=structuredClone(args.combined);return result(r.technical_validation);}
     if(action==='animation/record-preview'){r.gif_previews||=[];r.gif_previews.push(structuredClone(args.preview));r.current_preview_id=args.preview.preview_id;return result(args.preview);}
     if(action==='animation/record-contact-sheet'){r.contact_sheets||=[];r.contact_sheets.push(structuredClone(args.contact_sheet));r.current_contact_sheet_id=args.contact_sheet.contact_sheet_id;return result(args.contact_sheet);}
-    if(action==='animation/record-semantic'){r.semantic_validations||=[];r.semantic_validations.push(structuredClone(args.validation));if(!args.validation.frame_id)r.semantic_validation=structuredClone(args.validation);r.combined_validation=structuredClone(args.combined);return result({validation:args.validation,combined_validation:r.combined_validation});}
+    if(action==='animation/record-semantic'){r.semantic_validations||=[];r.semantic_validations.push(structuredClone(args.validation));if(!args.validation.frame_id){r.semantic_validation=structuredClone(args.validation);r.semantic_reinspection_required=false;}r.combined_validation=structuredClone(args.combined);return result({validation:args.validation,combined_validation:r.combined_validation});}
+    if(action==='animation/record-repair-plan'){r.repair_plans||=[];r.repair_plans.push(structuredClone(args.plan));r.repair_history||=[];r.repair_history.push({repair_plan_id:args.plan.repair_plan_id,animation_id:r.id,attempt:args.plan.attempt,repaired_frame_indexes:[],issue_reason_codes:[...new Set(args.plan.frames_to_repair.flatMap(frame=>frame.reasons))],previous_validation_score:args.plan.previous_validation_score,new_technical_score:null,created_at:args.plan.created_at});return result(args.plan);}
+    if(action==='animation/record-repair-frame'){const plan=(r.repair_plans||[]).find(item=>item.repair_plan_id===args.repair_plan_id);if(!plan||plan.status!=='active')throw Error('Repair plan is not active');if(!plan.repaired_frame_indexes.includes(args.frame_index))plan.repaired_frame_indexes.push(args.frame_index);const history=(r.repair_history||[]).find(item=>item.repair_plan_id===plan.repair_plan_id);if(history&&!history.repaired_frame_indexes.includes(args.frame_index))history.repaired_frame_indexes.push(args.frame_index);r.semantic_reinspection_required=true;r.updated_at=new Date().toISOString();return result(plan);}
+    if(action==='animation/record-repair-evaluation'){const plan=(r.repair_plans||[]).find(item=>item.repair_plan_id===args.repair_plan_id);if(!plan)throw Error('Repair plan not found');plan.status='evaluated';plan.new_technical_score=args.technical_score;plan.gif_preview_id=args.gif_preview_id;plan.contact_sheet_id=args.contact_sheet_id;plan.evaluated_at=new Date().toISOString();const history=(r.repair_history||[]).find(item=>item.repair_plan_id===plan.repair_plan_id);if(history)history.new_technical_score=args.technical_score;r.semantic_reinspection_required=true;r.updated_at=plan.evaluated_at;return result(plan);}
     if(action==='animation/configure'){const {id,...options}=args;const test=structuredClone(w);W.configure(test,id,options);commit();return W.configure(w,id,options);}
     if(action==='animation/attach-video'){commit();return W.attach(w,args.id,args.path);}
     if(action==='animation/submit-result'){

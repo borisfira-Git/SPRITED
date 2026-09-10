@@ -25,7 +25,7 @@ export function startMcp(service) {
         if(!action){send(id,null,{code:-32602,message:'Unknown tool'});return;}
         const result=await service.call(action,params.arguments||{});
         const content=[{type:'text',text:JSON.stringify(result)}];
-        if(result.success&&['get_frame_asset','build_contact_sheet'].includes(params.name)){
+        if(result.success&&['get_character','get_frame_asset','build_contact_sheet'].includes(params.name)){
           const asset=await service.readContentReference(result.result.content_reference);content.push({type:'image',data:asset.bytes.toString('base64'),mimeType:asset.mime_type});
         }
         send(id,{content,structuredContent:result,isError:!result.success});
