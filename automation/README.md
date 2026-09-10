@@ -43,7 +43,9 @@ Configure a stdio server in the agent's MCP settings. Replace the two paths:
 }
 ```
 
-12 tools are exposed, including all 11 requested tools and `sprited_preview_animation`. The MCP process owns a persistent headless session; it needs no HTTP server. It uses newline-delimited JSON-RPC stdio, protocol version `2025-06-18`, and returns structured tool results. No shell execution, generic file writes or arbitrary browser evaluation is exposed.
+The focused agent surface exposes 21 tools for direct frames, inspection, validation, targeted repair and PNG sprite-sheet export. The MCP process owns a persistent headless session; it needs no HTTP server. It uses newline-delimited JSON-RPC stdio, protocol version `2025-06-18`, and returns structured tool results. No generic file writes or arbitrary browser evaluation is exposed.
+
+An optional trusted local image process can be configured by copying `image-providers.example.json` to `<workspace>/.sprited/image-providers.json` and setting its executable/script. MCP callers select only the stable ID `local_process`; they cannot supply commands or paths. SPRITED creates a temporary request directory, validates the process result, imports PNG/WebP into normal frame storage, and removes the temporary files.
 
 ## Local API
 

@@ -1102,6 +1102,7 @@
     if(r.job_id&&['animation/attach-video','animation/submit-result'].includes(action))throw Error('Use jobs/submit-result and an active claim token for a queued job');
     if(action==='animation/status')return result({...r,editor_snapshot:undefined});
     if(action==='animation/list-frames')return result((r.frame_records||[]).toSorted((a,b)=>a.frame_index-b.frame_index).map(({storage_path,...frame})=>frame));
+    if(action==='animation/set-image-provider'){if(!['external_manual','local_process'].includes(args.provider))throw Error('Unknown image provider');r.image_provider_id=args.provider;r.updated_at=new Date().toISOString();return result({animation_id:r.id,image_provider:r.image_provider_id});}
     if(action==='animation/store-frame'){
       const records=r.frame_records||=[];let record;
       if(args.replace){record=records.find(frame=>frame.frame_id===args.record.frame_id);if(!record)throw Error('Frame not found');Object.assign(record,args.record,{frame_index:record.frame_index,created_at:record.created_at});}

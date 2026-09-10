@@ -7,7 +7,7 @@ import {validate} from './contracts.mjs';
 import {diagnostics} from './diagnostics.mjs';
 import {Connections} from './connections.mjs';
 import {acquireLock,releaseLock} from './lock.mjs';
-import {ExternalManualProvider} from './image-provider.mjs';
+import {ExternalManualProvider,LocalProcessProvider} from './image-provider.mjs';
 import {validateAnimation,detectBadFrames} from './animation-validator.mjs';
 import {encodeGif} from './gif-encoder.mjs';
 import {ExternalManualVisionProvider,combineValidation} from './semantic-validator.mjs';
@@ -22,7 +22,7 @@ const compactAgentResult=value=>{
   return result;
 };
 export class Service {
-  constructor(root){this.root=path.resolve(root);this.tail=Promise.resolve();this.imageProviders={external_manual:new ExternalManualProvider()};this.visionProviders={external_manual:new ExternalManualVisionProvider()};this.manifest={version:1,character:'Character',animation:'animation',source_video:null,target_frames:24,background:'#00ff00',alignment:'body',frame_size:[512,512]};}
+  constructor(root){this.root=path.resolve(root);this.tail=Promise.resolve();this.defaultImageProvider='external_manual';this.imageProviders={external_manual:new ExternalManualProvider()};this.visionProviders={external_manual:new ExternalManualVisionProvider()};this.manifest={version:1,character:'Character',animation:'animation',source_video:null,target_frames:24,background:'#00ff00',alignment:'body',frame_size:[512,512]};}
   async init(){
     this.root=await realpath(this.root);
     this.stateDir=await this.directory('.sprited');
@@ -50,12 +50,18 @@ export class Service {
       return route.fulfill({contentType:asset[1],body:await readFile(path.join(appRoot,asset[0]))});
     });
     await this.page.goto('http://sprited.local/');
+    await this.configureImageProviders();
     try {
       const session=JSON.parse(await readFile(await this.input('.sprited/session.json',['.json'],110*1024*1024),'utf8'));
       await this.openProject(session.project);this.manifest={...this.manifest,...this.safeManifest(session.manifest)};
       if(this.manifest.source_video)this.videoPath=await this.input(this.manifest.source_video,['.mp4','.webm','.mov'],250*1024*1024);
     }catch(error){if(error.code!=='ENOENT')throw error;}
     return this;
+  }
+  async configureImageProviders(){
+    let config={default_provider:'external_manual',providers:{local_process:{enabled:false}}};try{const file=await this.input('.sprited/image-providers.json',['.json'],64*1024);config=JSON.parse(await readFile(file,'utf8'));}catch(error){if(error.code!=='ENOENT')throw Error('Invalid image provider configuration');}
+    if(!['external_manual','local_process'].includes(config.default_provider)||!config.providers||typeof config.providers!=='object')throw Error('Invalid image provider configuration');this.defaultImageProvider=config.default_provider;
+    this.imageProviders.local_process=new LocalProcessProvider(config.providers.local_process||{enabled:false},{tempRoot:await this.directory('.sprited/provider-tmp'),assetResolver:reference=>this.readContentReference(reference)});
   }
   contained(target){const rel=path.relative(this.root,target);if(rel==='..'||rel.startsWith('..'+path.sep)||path.isAbsolute(rel))throw new Error('Path is outside the configured workspace');return target;}
   async input(value,extensions,max){const target=this.contained(await realpath(this.contained(path.resolve(this.root,value))));if(!extensions.includes(path.extname(target).toLowerCase()))throw new Error('Unsupported file type');const info=await stat(target);if(!info.isFile()||info.size>max)throw new Error('File is too large or is not a regular file');return target;}
@@ -102,15 +108,18 @@ export class Service {
     const temp=path.join(this.stateDir,`${randomUUID()}.tmp`);
     await writeFile(temp,JSON.stringify({manifest:this.manifest,project}),{flag:'wx'});await rename(temp,target);
   }
-  async storeExternalFrame(args,replace=false){
+  async storeProviderFrame(args,replace=false){
     const run=await this.core('workflow/animation/status',{id:args.animation_id}),records=run.frame_records||[],previous=replace?records.find(frame=>frame.frame_id===args.frame_id):null;
     if(replace&&!previous)throw Error('Frame not found');
-    const normalized=await this.imageProviders.external_manual[replace?'edit_frame':'generate_frame'](args),src=`data:${normalized.mime_type};base64,${normalized.bytes.toString('base64')}`;
+    const providerId=args.provider||run.image_provider_id||this.defaultImageProvider,provider=this.imageProviders[providerId];if(!provider)throw Error('Unknown image provider');
+    const frameIndex=previous?.frame_index??args.frame_index,prior=records.find(frame=>frame.frame_index===frameIndex-1),next=records.find(frame=>frame.frame_index===frameIndex+1),reference=`character:${run.character_profile_id}`,current=previous?`frame:${previous.frame_id}`:null,priorRef=prior?`frame:${prior.frame_id}`:null,nextRef=next?`frame:${next.frame_id}`:null;
+    const request=providerId==='external_manual'?args:{animation_id:run.id,frame_index:frameIndex,animation_type:run.animation_type,reference_asset:reference,previous_frame:priorRef,next_frame:nextRef,current_frame:current,repair_reasons:args.repair_reasons||[],instruction:args.instruction,assets:{reference,current,previous:priorRef,next:nextRef}};
+    const normalized=await provider[replace?'edit_frame':'generate_frame'](request),src=`data:${normalized.mime_type};base64,${normalized.bytes.toString('base64')}`;
     const dimensions=await this.page.evaluate(source=>new Promise((resolve,reject)=>{const image=new Image();image.onload=()=>resolve({width:image.naturalWidth,height:image.naturalHeight});image.onerror=()=>reject(Error('Image could not be decoded'));image.src=source;}),src);
     if(dimensions.width*dimensions.height>4*1024*1024)throw Error('Frame exceeds 4 megapixels');
     const frameId=previous?.frame_id||randomUUID(),createdAt=previous?.created_at||new Date().toISOString(),dir=await this.directory(`SPRITED_DATA/characters/${run.character_profile_id}/animations/${run.animation_type.toLowerCase()}/${run.id}/frames`),target=path.join(dir,`${frameId}-${randomUUID()}.${normalized.format}`);
     await writeFile(target,normalized.bytes,{flag:'wx'});
-    const record={frame_id:frameId,character_id:run.character_profile_id,animation_id:run.id,frame_index:previous?.frame_index??args.frame_index,format:normalized.format,width:dimensions.width,height:dimensions.height,created_at:createdAt,storage_path:path.relative(this.root,target)};
+    const record={frame_id:frameId,character_id:run.character_profile_id,animation_id:run.id,frame_index:frameIndex,format:normalized.format,width:dimensions.width,height:dimensions.height,created_at:createdAt,provider:providerId,storage_path:path.relative(this.root,target)};
     let result;try{result=await this.core('workflow/animation/store-frame',{id:run.id,record,replace});await this.persist();}catch(error){await unlink(target).catch(()=>{});throw error;}
     if(previous?.storage_path&&previous.storage_path!==record.storage_path){const old=await this.input(previous.storage_path,['.png','.webp'],9*1024*1024).catch(()=>null);if(old)await unlink(old).catch(()=>{});}
     return result;
@@ -120,7 +129,7 @@ export class Service {
     if(records.length<2)throw Error('Submit at least two frames before building a sprite sheet');
     if(records.some((frame,index)=>frame.frame_index!==index))throw Error('Frame indexes must be contiguous and start at 0');
     const frames=[];for(const record of records){const file=await this.input(record.storage_path,['.png','.webp'],9*1024*1024),bytes=await readFile(file);frames.push({path:record.storage_path,name:`Frame ${String(record.frame_index+1).padStart(2,'0')}`,src:`data:image/${record.format};base64,${bytes.toString('base64')}`});}
-    return this.core('workflow/animation/attach-frames',{id,frames,provider:'external_manual'});
+    return this.core('workflow/animation/attach-frames',{id,frames,provider:run.image_provider_id||'external_manual'});
   }
   async decodeStoredFrames(id,full=false){
     const run=await this.core('workflow/animation/status',{id}),records=run.frame_records||[],inputs=[];
@@ -155,7 +164,7 @@ export class Service {
     const validation=await this.visionProviders.external_manual.validate_animation({animation_id:run.id,max_frame_index:maxIndex,supervisor_result:args.supervisor_result}),validIndexes=new Set(records.map(frame=>frame.frame_index));if(validation.bad_frames.some(index=>!validIndexes.has(index)))throw Error('Semantic issue references a missing frame');const combined=combineValidation(run.technical_validation,validation);await this.core('workflow/animation/record-semantic',{id:run.id,validation,combined});await this.persist();return {validation,combined_validation:combined,animation_status:getAnimationStatus(await this.core('workflow/animation/status',{id:run.id}),{maxAttempts:DEFAULT_MAX_REPAIR_ATTEMPTS})};
   }
   async getRepairPlan(animationId){const run=await this.core('workflow/animation/status',{id:animationId}),status=getAnimationStatus(run,{maxAttempts:DEFAULT_MAX_REPAIR_ATTEMPTS});if(status.overall_status==='needs_validation')throw Error('Run technical validation before creating a repair plan');if(status.overall_status==='needs_semantic_validation'||status.overall_status==='needs_semantic_reinspection')throw Error('Semantic inspection is required before creating another repair plan');if(status.overall_status==='passed')throw Error('Animation already passes; no repair plan is needed');const plan=createRepairPlan(run,{maxAttempts:DEFAULT_MAX_REPAIR_ATTEMPTS});if(!(run.repair_plans||[]).some(item=>item.repair_plan_id===plan.repair_plan_id)){await this.core('workflow/animation/record-repair-plan',{id:run.id,plan});await this.persist();}return plan;}
-  async submitRepairFrame(args){const found=await this.core('workflow/repair/find',{id:args.repair_plan_id}),target=found.plan.frames_to_repair.find(frame=>frame.frame_index===args.frame_index);if(found.plan.status!=='active')throw Error('Repair plan is not active');if(!target)throw Error('Frame is not included in this repair plan');const frame=await this.storeExternalFrame({animation_id:found.animation_id,frame_id:target.frame_id,format:args.format,image_base64:args.image_base64},true);await this.core('workflow/animation/record-repair-frame',{id:found.animation_id,repair_plan_id:args.repair_plan_id,frame_index:args.frame_index});await this.persist();return {repair_plan_id:args.repair_plan_id,frame,repaired_frame_indexes:[...new Set([...(found.plan.repaired_frame_indexes||[]),args.frame_index])].sort((a,b)=>a-b),animation_status:getAnimationStatus(await this.core('workflow/animation/status',{id:found.animation_id}),{maxAttempts:DEFAULT_MAX_REPAIR_ATTEMPTS})};}
+  async submitRepairFrame(args){const found=await this.core('workflow/repair/find',{id:args.repair_plan_id}),target=found.plan.frames_to_repair.find(frame=>frame.frame_index===args.frame_index);if(found.plan.status!=='active')throw Error('Repair plan is not active');if(!target)throw Error('Frame is not included in this repair plan');const frame=await this.storeProviderFrame({animation_id:found.animation_id,frame_id:target.frame_id,provider:args.provider,format:args.format,image_base64:args.image_base64,instruction:args.instruction,repair_reasons:target.reasons},true);await this.core('workflow/animation/record-repair-frame',{id:found.animation_id,repair_plan_id:args.repair_plan_id,frame_index:args.frame_index});await this.persist();return {repair_plan_id:args.repair_plan_id,frame,repaired_frame_indexes:[...new Set([...(found.plan.repaired_frame_indexes||[]),args.frame_index])].sort((a,b)=>a-b),animation_status:getAnimationStatus(await this.core('workflow/animation/status',{id:found.animation_id}),{maxAttempts:DEFAULT_MAX_REPAIR_ATTEMPTS})};}
   async evaluateRepair(repairPlanId){const found=await this.core('workflow/repair/find',{id:repairPlanId});if(found.plan.status!=='active')throw Error('Repair plan is not active');if(!found.plan.repaired_frame_indexes?.length)throw Error('Submit at least one repair frame before evaluation');const gif=await this.buildGifPreview({animation_id:found.animation_id}),technical=await this.runTechnicalValidation(found.animation_id),contactSheet=await this.buildContactSheet({animation_id:found.animation_id,include_frame_numbers:true});await this.core('workflow/animation/record-repair-evaluation',{id:found.animation_id,repair_plan_id:repairPlanId,technical_score:technical.score,gif_preview_id:gif.preview_id,contact_sheet_id:contactSheet.contact_sheet_id});await this.persist();return {repair_plan_id:repairPlanId,technical:{passed:technical.passed,score:technical.score},loop:{passed:technical.loop_validation.passed,score:technical.loop_validation.loop_score},semantic_status:'needs_reinspection',repaired_frames:found.plan.repaired_frame_indexes,gif_preview_id:gif.preview_id,contact_sheet_id:contactSheet.contact_sheet_id,contact_sheet_reference:contactSheet.content_reference,animation_status:getAnimationStatus(await this.core('workflow/animation/status',{id:found.animation_id}),{maxAttempts:DEFAULT_MAX_REPAIR_ATTEMPTS})};}
   async buildGifPreview(args){
     const {run,frames}=await this.decodeStoredFrames(args.animation_id,true);if(frames.some(frame=>!frame.rgba))throw Error('All frames must be valid PNG/WebP images');if(frames.reduce((sum,frame)=>sum+frame.width*frame.height,0)>32*1024*1024)throw Error('Animation exceeds GIF pixel budget');
@@ -176,15 +185,15 @@ export class Service {
       if(action==='agent/get-character'){const character=await this.core('workflow/character/select',{id:args.id});return envelope({...compactAgentResult(character),content_reference:`character:${character.id}`});}
       if(action==='agent/generate-animation'){
         const recipes=await this.core('workflow/recipes/list'),recipe=recipes.find(r=>r.animation_type===args.animation_type);if(!recipe)throw Error('Unknown animation type');
-        const job=await this.core('workflow/jobs/create',{character_id:args.character_id,animation_type:args.animation_type,duration:recipe.target_duration,loop:recipe.loop,frames:recipe.default_output_frame_count,sampling:'uniform'});await this.directory(job.output_directory);await writeFile(path.join(this.root,job.output_directory,'job.json'),JSON.stringify(job,null,2),{flag:'wx'});await this.persist();return {...envelope(compactAgentResult(job)),status:'queued',next_suggested_action:'Create ordered PNG/WebP images and call submit_frame for each frame.'};
+        const job=await this.core('workflow/jobs/create',{character_id:args.character_id,animation_type:args.animation_type,duration:recipe.target_duration,loop:recipe.loop,frames:recipe.default_output_frame_count,sampling:'uniform'}),provider=args.provider||this.defaultImageProvider;await this.core('workflow/animation/set-image-provider',{id:job.attempt_id,provider});await this.directory(job.output_directory);await writeFile(path.join(this.root,job.output_directory,'job.json'),JSON.stringify(job,null,2),{flag:'wx'});await this.persist();return {...envelope({...compactAgentResult(job),image_provider:provider}),status:'queued',next_suggested_action:provider==='local_process'?'Call submit_frame for each frame index; SPRITED will invoke the configured local process.':'Create ordered PNG/WebP images and call submit_frame for each frame.'};
       }
       if(action==='agent/redo-animation'){
         const job=await this.core('workflow/attempts/redo',{id:args.id});await this.directory(job.output_directory);await writeFile(path.join(this.root,job.output_directory,'job.json'),JSON.stringify(job,null,2),{flag:'wx'});
         await this.persist();return {...envelope(compactAgentResult(job)),status:'queued',next_suggested_action:'Call submit_frame for each replacement frame.'};
       }
       if(action==='agent/use-result'){result=await this.core('workflow/animation/approve',{id:args.id});await this.persist();return {...envelope(compactAgentResult(result),result.warnings||[]),status:'approved',next_suggested_action:'Call build_spritesheet.'};}
-      if(action==='agent/submit-frame'){result=await this.storeExternalFrame(args,false);return {...envelope(result),status:'stored',next_suggested_action:'Submit the next frame or call list_frames.'};}
-      if(action==='agent/replace-frame'){result=await this.storeExternalFrame(args,true);return {...envelope(result),status:'replaced',next_suggested_action:'Call list_frames to verify the sequence.'};}
+      if(action==='agent/submit-frame'){result=await this.storeProviderFrame(args,false);return {...envelope(result),status:'stored',next_suggested_action:'Submit the next frame or call list_frames.'};}
+      if(action==='agent/replace-frame'){result=await this.storeProviderFrame(args,true);return {...envelope(result),status:'replaced',next_suggested_action:'Call list_frames to verify the sequence.'};}
       if(action==='agent/list-frames')return envelope(await this.core('workflow/animation/list-frames',{id:args.animation_id}));
       if(action==='agent/build-gif'){result=await this.buildGifPreview(args);return {...envelope(result),status:'ready'};}
       if(action==='agent/validate-animation'){result=await this.runTechnicalValidation(args.animation_id);return {...envelope(result),status:result.passed?'passed':'issues_found'};}

@@ -1,0 +1,12 @@
+{
+  "default_provider": "external_manual",
+  "providers": {
+    "local_process": {
+      "enabled": false,
+      "executable": "C:\\path\\to\\trusted-runtime.exe",
+      "script": "C:\\path\\to\\local-generator-script.js",
+      "arguments": [],
+      "timeout_ms": 15000
+    }
+  }
+}
