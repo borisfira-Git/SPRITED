@@ -3,10 +3,10 @@
   "providers": {
     "local_process": {
       "enabled": false,
-      "executable": "C:\\path\\to\\trusted-runtime.exe",
-      "script": "C:\\path\\to\\local-generator-script.js",
-      "arguments": [],
-      "timeout_ms": 15000
+      "executable": "C:\\path\\to\\node.exe",
+      "script": "C:\\path\\to\\SPRITED\\automation\\providers\\sprited-comfy-bridge.mjs",
+      "arguments": ["C:\\path\\to\\comfyui-bridge.json"],
+      "timeout_ms": 60000
     }
   }
 }

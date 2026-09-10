@@ -1,0 +1,8 @@
+{
+  "provider_id": "comfyui_local",
+  "type": "local_process",
+  "endpoint": "http://127.0.0.1:8188",
+  "generate_workflow": "C:\\path\\to\\sprited-generate-workflow.json",
+  "edit_workflow": "C:\\path\\to\\sprited-edit-workflow.json",
+  "timeout_ms": 55000
+}

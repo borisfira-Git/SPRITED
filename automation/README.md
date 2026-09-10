@@ -47,6 +47,8 @@ The focused agent surface exposes 21 tools for direct frames, inspection, valida
 
 An optional trusted local image process can be configured by copying `image-providers.example.json` to `<workspace>/.sprited/image-providers.json` and setting its executable/script. MCP callers select only the stable ID `local_process`; they cannot supply commands or paths. SPRITED creates a temporary request directory, validates the process result, imports PNG/WebP into normal frame storage, and removes the temporary files.
 
+`providers/sprited-comfy-bridge.mjs` is the first local bridge. Configure it with a copy of `providers/comfyui-bridge.example.json` and external ComfyUI API-format workflow JSON files. It uploads only the materialized reference frames, replaces documented `{{...}}` placeholders, and talks only to a localhost ComfyUI endpoint. ComfyUI and its models are installed and managed separately.
+
 ## Local API
 
 ```powershell

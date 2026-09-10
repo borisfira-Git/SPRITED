@@ -1,0 +1,5 @@
+{
+  "1": {"class_type": "LoadImage", "inputs": {"image": "{{reference_image}}"}},
+  "2": {"class_type": "TextEncode", "inputs": {"text": "{{instruction}}"}},
+  "3": {"class_type": "SaveImage", "inputs": {"filename_prefix": "{{output_filename}}", "images": ["1", 0]}}
+}

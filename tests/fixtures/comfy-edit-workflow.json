@@ -1,0 +1,8 @@
+{
+  "1": {"class_type": "LoadImage", "inputs": {"image": "{{reference_image}}"}},
+  "2": {"class_type": "LoadImage", "inputs": {"image": "{{current_frame}}"}},
+  "3": {"class_type": "LoadImage", "inputs": {"image": "{{previous_frame}}"}},
+  "4": {"class_type": "LoadImage", "inputs": {"image": "{{next_frame}}"}},
+  "5": {"class_type": "TextEncode", "inputs": {"text": "{{instruction}}"}},
+  "6": {"class_type": "SaveImage", "inputs": {"filename_prefix": "{{output_filename}}", "images": ["2", 0]}}
+}
