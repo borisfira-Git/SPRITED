@@ -4,12 +4,12 @@
 
 The shared conversation https://chatgpt.com/s/cx_6aa05d50ee448191acbfff16b02759d0 was opened and read in the browser. Its title is **תכנן כלי Sprite Sheet** and it ends at SPRITED 0.6.10. This matches the local Codex task `019f914c-c6da-7752-bf60-3acb99251ba4` and the repository below. The earlier `/share/6aa05cc9-...` link could not be fetched by the web tool; no architectural claims were inferred from that failure.
 
-Original repository (left unchanged):
-`C:/Users/User/.codex/visualizations/2026/07/23/019f914c-c6da-7752-bf60-3acb99251ba4/animasprite-site`
+Canonical repository root:
+`C:\Users\User\Documents\Codex\2026-09-08\referenced-chatgpt-conversation-this-is-an-4\work\SPRITED`
 
 Baseline: clean Git working tree, commit `8fe10b5` (Align sprite frames by right foot in SPRITED 0.6.10), preceded by `25d4c30` and `a5b372b`.
 
-Current development clone: `work/SPRITED` beneath this task workspace. It retains the original Git history and `.openai/hosting.json`. No new application was scaffolded; no site was created or deployed. Original release ZIPs remain in the July 24 task's `outputs/SPRITED` directory.
+This repository retains the original Git history and `.openai/hosting.json`. No new application was scaffolded; no site was created or deployed. Original release ZIPs remain in the July 24 task's `outputs/SPRITED` directory.
 
 ## Architecture found in code
 
