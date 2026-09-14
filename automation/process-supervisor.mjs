@@ -1,0 +1,70 @@
+export const PROCESS_STATES=Object.freeze({HEALTHY:'HEALTHY',WARNING:'WARNING',PROCESS_FAILURE:'PROCESS_FAILURE',HALTED:'HALTED',ESCALATION_REQUIRED:'ESCALATION_REQUIRED'});
+
+export const SUPERVISOR_THRESHOLDS=Object.freeze({
+  conservative:Object.freeze({non_improving_retries:2,regressions:1,persistent_attempts:3,persistent_strategies:2,poor_strategy_repeats:1,critical_regressions:1,negligible_improvement:3,complexity_growth_ratio:1.2,complexity_growth_repeats:2}),
+  balanced:Object.freeze({non_improving_retries:3,regressions:2,persistent_attempts:4,persistent_strategies:3,poor_strategy_repeats:2,critical_regressions:2,negligible_improvement:2,complexity_growth_ratio:1.25,complexity_growth_repeats:2}),
+  aggressive:Object.freeze({non_improving_retries:4,regressions:3,persistent_attempts:5,persistent_strategies:4,poor_strategy_repeats:3,critical_regressions:3,negligible_improvement:1,complexity_growth_ratio:1.4,complexity_growth_repeats:3})
+});
+
+const critical=new Set(['anatomy','character_identity_drift','costume_or_armor_drift','equipment_drift','direction_flip','bad_visual_loop','loop_visual_jump','loop_center_jump','loop_scale_jump']);
+const unique=value=>[...new Set((Array.isArray(value)?value:[]).filter(Boolean))];
+const score=value=>Number.isFinite(value)?Number(value):null;
+const issuesFrom=validation=>unique(validation?.issues?.map(item=>item.type)||[]);
+const framesFrom=validation=>unique((validation?.issues||[]).flatMap(item=>Number.isInteger(item.frame_index)?[item.frame_index]:Number.isInteger(item.frame)?[item.frame]:Array.isArray(item.frames)?item.frames:[])).sort((a,b)=>a-b);
+const signature=items=>unique(items).sort().join('|')||'clear';
+const overall=(technical,semantic)=>semantic&&Number.isFinite(semantic.semantic_score??semantic.score)?Math.round((score(technical?.score)??0)*.45+(score(semantic.semantic_score??semantic.score)??0)*.55):score(technical?.score);
+
+export function createSupervisorSession(run,{strictness='balanced',now=()=>new Date().toISOString()}={}){
+  if(!SUPERVISOR_THRESHOLDS[strictness])throw Error('Unknown supervisor strictness');
+  const issue_types=unique([...(run.technical_validation?.issues||[]),...(run.semantic_validation?.issues||[])].map(item=>item.type)),bestScore=overall(run.technical_validation,run.semantic_validation);
+  return {version:1,state:PROCESS_STATES.HEALTHY,strictness,halted:false,silent_resume_allowed:false,created_at:now(),updated_at:now(),triggers:[],observations:[],disabled_strategies:[],best_known_result:{score:bestScore,issue_types,frame_records:structuredClone(run.frame_records||[]),technical_validation:structuredClone(run.technical_validation||null),semantic_validation:structuredClone(run.semantic_validation||null),combined_validation:structuredClone(run.combined_validation||null),captured_at:now()},diagnosis:null,correction_request:null,codex_escalation_prompt:null};
+}
+
+export function deprioritizeLowPerformingStrategies(ranking,disabled=[]){
+  const blocked=new Set(disabled),items=(ranking?.ranked_strategies||[]).filter(item=>!blocked.has(item.strategy_id)).sort((a,b)=>b.ranking_score-a.ranking_score),selected=items.find(item=>item.confidence!=='experimental')||items[0];
+  return selected?{...ranking,...selected,strategy_source:selected.confidence==='experimental'?'default':'experience',ranked_strategies:items,deprioritized_strategy_ids:[...blocked]}:{...ranking,deprioritized_strategy_ids:[...blocked]};
+}
+
+function likelyCause({triggers,issues,newIssues,observations,strategies}){
+  if(triggers.includes('failed_attempt_used_as_next_base'))return 'failed attempt incorrectly used as next repair base';
+  if(triggers.includes('known_poor_strategy_reselected'))return 'learning strategy confidence/ranking mismatch';
+  if(triggers.includes('prompt_complexity_without_improvement'))return 'repair prompt over-constrained';
+  if(newIssues.some(item=>['anatomy','character_identity_drift','silhouette_jump'].includes(item)))return 'silhouette preservation too strong';
+  if(issues.some(item=>['leg_progression','bad_weight_transfer','broken_contact_pose','broken_passing_pose'].includes(item))&&strategies.length>=2)return 'paired-frame / contralateral gait constraint missing';
+  const last=observations.at(-1);if(last&&last.target_issue_delta>0&&last.overall_delta<=0)return 'target-issue scoring outweighed by overall score';
+  if(triggers.includes('oscillating_failure_states'))return 'repair scope too broad';
+  if(observations.length>=3&&new Set(observations.slice(-3).map(item=>item.score)).size===1)return 'validator disagreement / weak signal';
+  return 'repair scope too broad';
+}
+
+function correctionFor(cause,strategies){
+  if(cause==='silhouette preservation too strong')return {kind:'runtime_policy_adjustment',changes:{silhouette_preservation_priority:'lower',repair_scope:'frame_local',base_result:'BEST_KNOWN_RESULT'},bounded:true};
+  if(cause==='repair prompt over-constrained')return {kind:'runtime_policy_adjustment',changes:{prompt_complexity:'reduce',repair_scope:'frame_local',base_result:'BEST_KNOWN_RESULT'},bounded:true};
+  if(cause==='paired-frame / contralateral gait constraint missing')return {kind:'runtime_policy_adjustment',changes:{paired_gait_phase_constraints:'enforce',base_result:'BEST_KNOWN_RESULT'},bounded:true};
+  if(cause==='repair scope too broad')return {kind:'runtime_policy_adjustment',changes:{repair_scope:'frame_local',base_result:'BEST_KNOWN_RESULT'},bounded:true};
+  if(cause==='learning strategy confidence/ranking mismatch')return {kind:'runtime_policy_adjustment',changes:{disable_strategy_for_context:strategies.at(-1)||null,choose_alternate_strategy:true,base_result:'BEST_KNOWN_RESULT'},bounded:true};
+  return null;
+}
+
+function codexPrompt(diagnosis){return `Investigate a focused SPRITED repair-process failure.\n\nObserved evidence:\n- Animation: ${diagnosis.animation_type}\n- Persistent issues: ${diagnosis.persistent_issues.join(', ')||'none identified'}\n- Frames/phases: ${diagnosis.affected_frames.join(', ')||'not isolated'} / ${diagnosis.affected_phases.join(', ')||'not isolated'}\n- Retries: ${diagnosis.retry_count}; distinct strategies: ${diagnosis.strategies_tried.join(', ')||'none'}\n- Score trend: ${diagnosis.score_trend.join(' -> ')}\n- Best-known trend: ${diagnosis.best_known_result_trend.join(' -> ')}\n- Regressions/new issues: ${diagnosis.regressions_introduced.join(', ')||'none'}\n- Triggers: ${diagnosis.triggers.join(', ')}\n- Suspected cause: ${diagnosis.likely_process_cause}\n\nInspect only repair-orchestrator, prompt-generation, BEST_KNOWN_RESULT anchoring, strategy selection, validator weighting, and learning confidence/ranking. Verify whether a failed attempt became the next repair base and whether validator weights hide target-issue failure. Do not redesign providers, UI, deployment, versioning, or unrelated systems. Add focused regression tests reproducing the evidence, BEST_KNOWN_RESULT rollback, strategy selection, and validator weighting.`;}
+
+export function observeRepairSession(run,{technical,semantic=null,strategyStats=[],promptComplexity=0,baseWasBestKnown=true,now=()=>new Date().toISOString()}={}){
+  const session=structuredClone(run.process_supervisor||createSupervisorSession(run,{strictness:run.supervisor_strictness||'balanced',now}));if(session.halted)return session;
+  const limits=SUPERVISOR_THRESHOLDS[session.strictness],plan=(run.repair_plans||[]).at(-1)||{},beforeScore=score(plan.validator_scores_before?.overall)??score(plan.semantic_score)??score(plan.previous_validation_score)??session.best_known_result.score,currentScore=overall(technical,semantic),beforeIssues=unique(plan.issue_types_before||session.best_known_result.issue_types),afterIssues=unique([...issuesFrom(technical),...issuesFrom(semantic)]),persistent=beforeIssues.filter(item=>afterIssues.includes(item)),newIssues=afterIssues.filter(item=>!beforeIssues.includes(item)),strategies=unique((plan.frames_to_repair||[]).map(item=>item.strategy_id||item.repair_action)),phases=unique((plan.frames_to_repair||[]).map(item=>item.phase)),promptSize=promptComplexity||Math.max(0,...(plan.repair_results||[]).map(item=>item.instruction_summary?.length||0)),delta=currentScore===null||beforeScore===null?0:currentScore-beforeScore,bestScore=session.best_known_result.score,regressive=currentScore!==null&&bestScore!==null&&currentScore<bestScore||newIssues.some(item=>critical.has(item));
+  const observation={attempt:plan.attempt||session.observations.length+1,score:currentScore,before_score:beforeScore,overall_delta:delta,target_issue_delta:delta,issue_types:afterIssues,persistent_issues:persistent,new_issues:newIssues,affected_frames:unique([...framesFrom(technical),...framesFrom(semantic)]),affected_phases:phases,strategies,prompt_complexity:promptSize,regressive,base_was_best_known:baseWasBestKnown,created_at:now()};session.observations.push(observation);
+  if(!regressive&&currentScore!==null&&(bestScore===null||currentScore>bestScore)){session.best_known_result={score:currentScore,issue_types:afterIssues,frame_records:structuredClone(run.frame_records||[]),technical_validation:structuredClone(technical||null),semantic_validation:structuredClone(semantic||null),combined_validation:structuredClone(run.combined_validation||null),captured_at:now()};}
+  const observations=session.observations,tailCount=predicate=>{let count=0;for(const item of [...observations].reverse()){if(!predicate(item))break;count++;}return count;},nonImproving=tailCount(item=>item.target_issue_delta<=limits.negligible_improvement),regressions=tailCount(item=>item.regressive),allStrategies=unique(observations.flatMap(item=>item.strategies)),triggers=[];
+  if(nonImproving>=limits.non_improving_retries)triggers.push('consecutive_non_improving_retries');
+  if(regressions>=limits.regressions)triggers.push('consecutive_best_known_regressions');
+  for(const issue of afterIssues){const matching=observations.filter(item=>item.issue_types.includes(issue)),distinct=unique(matching.flatMap(item=>item.strategies));if(matching.length>=limits.persistent_attempts||distinct.length>=limits.persistent_strategies){triggers.push('persistent_issue_across_attempts_or_strategies');break;}}
+  const selectedPoor=strategies.find(id=>{const stat=strategyStats.find(item=>item.strategy_id===id);return stat&&stat.attempts>=2&&(stat.ranking_score<0||stat.success_rate<.25);});if(selectedPoor&&observations.filter(item=>item.strategies.includes(selectedPoor)).length>=limits.poor_strategy_repeats)triggers.push('known_poor_strategy_reselected');
+  const sig=observations.map(item=>signature(item.issue_types));if(sig.length>=4&&sig.at(-1)===sig.at(-3)&&sig.at(-2)===sig.at(-4)&&sig.at(-1)!==sig.at(-2))triggers.push('oscillating_failure_states');
+  if(observations.filter(item=>item.new_issues.some(issue=>critical.has(issue))).length>=limits.critical_regressions)triggers.push('repeated_critical_regression');
+  const growth=observations.slice(1).filter((item,index)=>item.prompt_complexity>(observations[index].prompt_complexity||1)*limits.complexity_growth_ratio&&item.target_issue_delta<=limits.negligible_improvement).length;if(growth>=limits.complexity_growth_repeats)triggers.push('prompt_complexity_without_improvement');
+  if(!baseWasBestKnown)triggers.push('failed_attempt_used_as_next_base');
+  session.metrics={retry_count:observations.length,consecutive_non_improving_retries:nonImproving,consecutive_regressions:regressions,persistent_issue_count:persistent.length,distinct_strategies_tried:allStrategies.length,repeated_low_performing_strategy:selectedPoor||null,target_issue_score_trend:observations.map(item=>item.score),best_known_result_trend:observations.map(item=>Math.max(session.best_known_result.score??-Infinity,item.score??-Infinity)).map(item=>Number.isFinite(item)?item:null),new_issues_introduced:unique(observations.flatMap(item=>item.new_issues)),prompt_complexity_trend:observations.map(item=>item.prompt_complexity)};
+  session.triggers=unique([...session.triggers,...triggers]);session.updated_at=now();
+  if(!triggers.length){session.state=nonImproving||regressions||persistent.length?PROCESS_STATES.WARNING:PROCESS_STATES.HEALTHY;return session;}
+  session.state=PROCESS_STATES.PROCESS_FAILURE;const cause=likelyCause({triggers:session.triggers,issues:afterIssues,newIssues,observations,strategies:allStrategies}),diagnosis={animation_type:run.animation_type,persistent_issues:persistent,affected_frames:unique(observations.flatMap(item=>item.affected_frames)),affected_phases:unique(observations.flatMap(item=>item.affected_phases)),retry_count:observations.length,strategies_tried:allStrategies,score_trend:observations.map(item=>item.score),best_known_result_trend:session.metrics.best_known_result_trend,regressions_introduced:session.metrics.new_issues_introduced,likely_process_cause:cause,recommended_next_action:null,triggers:session.triggers};
+  const correction=correctionFor(cause,allStrategies);session.halted=true;session.correction_request=correction;session.disabled_strategies=unique([...session.disabled_strategies,...(correction?.changes.disable_strategy_for_context?[correction.changes.disable_strategy_for_context]:[])]);if(correction){session.state=PROCESS_STATES.HALTED;diagnosis.recommended_next_action='Review and explicitly apply the bounded runtime policy correction; automatic retries remain halted.';}else{session.state=PROCESS_STATES.ESCALATION_REQUIRED;diagnosis.recommended_next_action='Use the generated Codex prompt for focused implementation inspection.';session.codex_escalation_prompt=codexPrompt(diagnosis);}session.diagnosis=diagnosis;return session;
+}
