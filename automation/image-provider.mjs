@@ -3,7 +3,7 @@ import {mkdir,mkdtemp,writeFile,readFile,realpath,stat,rm} from 'node:fs/promise
 import path from 'node:path';
 import {prepareAssistedRequest} from './chatgpt-assisted.mjs';
 
-const normalizeBytes=(bytes,format,provider)=>{
+export const normalizeFrameBytes=(bytes,format,provider)=>{
   if(!['png','webp'].includes(format))throw Error('Frame format must be png or webp');
   if(!Buffer.isBuffer(bytes)||!bytes.length||bytes.length>9*1024*1024)throw Error('Frame image is missing or too large');
   const png=bytes.length>=8&&bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),webp=bytes.length>=12&&bytes.subarray(0,4).toString()==='RIFF'&&bytes.subarray(8,12).toString()==='WEBP';
@@ -19,7 +19,7 @@ export class ImageProvider {
 
 export class ExternalManualProvider extends ImageProvider {
   constructor(id='external_manual'){super(id);}
-  normalize({image_base64,format}){if(typeof image_base64!=='string'||!image_base64.length||image_base64.length>12*1024*1024)throw Error('Frame image is missing or too large');return normalizeBytes(Buffer.from(image_base64,'base64'),format,this.id);}
+  normalize({image_base64,format}){if(typeof image_base64!=='string'||!image_base64.length||image_base64.length>12*1024*1024)throw Error('Frame image is missing or too large');return normalizeFrameBytes(Buffer.from(image_base64,'base64'),format,this.id);}
   async generate_frame(request){return this.normalize(request);}
   async edit_frame(request){return this.normalize(request);}
 }
@@ -45,7 +45,7 @@ export class LocalProcessProvider extends ImageProvider {
       const request={operation,animation_id:context.animation_id,frame_index:context.frame_index,animation_type:context.animation_type,reference_asset:context.reference_asset||null,previous_frame:context.previous_frame||null,next_frame:context.next_frame||null,current_frame:context.current_frame||null,repair_reasons:context.repair_reasons||[],instruction:context.instruction||null,materialized_assets:materialized},requestFile=path.join(directory,'request.json');await writeFile(requestFile,JSON.stringify(request,null,2),{flag:'wx'});
       const response=await new Promise((resolve,reject)=>{const child=spawn(executable,[...(script?[script]:[]),...(this.config.arguments||[]),requestFile],{cwd:directory,windowsHide:true,shell:false,stdio:['ignore','pipe','pipe']}),chunks=[];let size=0,settled=false;const finish=(error,value)=>{if(settled)return;settled=true;clearTimeout(timer);error?reject(error):resolve(value);};child.stdout.on('data',chunk=>{size+=chunk.length;if(size>1024*1024){child.kill();finish(Error('Local process response is too large'));}else chunks.push(chunk);});child.on('error',()=>finish(Error('Local process could not be started')));child.on('exit',code=>code===0?finish(null,Buffer.concat(chunks).toString('utf8')):finish(Error(`Local process failed with exit code ${code}`)));const timer=setTimeout(()=>{child.kill();finish(Error('Local process timed out'));},timeout);});
       let parsed;try{parsed=JSON.parse(response.trim());}catch{throw Error('Local process returned invalid JSON');}if(!parsed?.success)throw Error(typeof parsed?.error==='string'?`Local process failed: ${parsed.error}`:'Local process reported failure');if(typeof parsed.output_file!=='string'||!parsed.output_file)throw Error('Local process did not return an output file');
-      const output=await realpath(path.resolve(directory,parsed.output_file)).catch(()=>null),relative=output?path.relative(directory,output):null;if(!output||relative.startsWith('..')||path.isAbsolute(relative))throw Error('Local process output file is missing or outside its request directory');const info=await stat(output);if(!info.isFile()||info.size>9*1024*1024)throw Error('Local process output is missing or too large');const format=String(parsed.format||path.extname(output).slice(1)).toLowerCase();return {...normalizeBytes(await readFile(output),format,this.id),provider_metadata:{operation}};
+      const output=await realpath(path.resolve(directory,parsed.output_file)).catch(()=>null),relative=output?path.relative(directory,output):null;if(!output||relative.startsWith('..')||path.isAbsolute(relative))throw Error('Local process output file is missing or outside its request directory');const info=await stat(output);if(!info.isFile()||info.size>9*1024*1024)throw Error('Local process output is missing or too large');const format=String(parsed.format||path.extname(output).slice(1)).toLowerCase();return {...normalizeFrameBytes(await readFile(output),format,this.id),provider_metadata:{operation}};
     } finally {await rm(directory,{recursive:true,force:true}).catch(()=>{});}
   }
   async generate_frame(context){return this.run('generate_frame',context);}

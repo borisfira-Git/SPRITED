@@ -1,7 +1,8 @@
 {
   "name": "sprited-automation",
-  "version": "0.8.0-preview.4",
+  "version": "0.13.0-dev",
   "private": true,
   "type": "module",
+  "scripts": {"start:chatgpt":"node chatgpt-server.mjs"},
   "dependencies": { "playwright-core": "1.62.1" }
 }

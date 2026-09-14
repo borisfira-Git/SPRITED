@@ -1,0 +1,14 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,rm} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import path from 'node:path';
+import {CodexRepairSupervisor} from '../automation/codex-repair-supervisor.mjs';
+import {ExperienceService} from '../automation/experience-service.mjs';
+
+const fallback={issue_type:'visual_jump',recommended_strategy:'regenerate',repair_action:'regenerate',repair_instruction:'Use the deterministic repair.',use_previous_frame:true,use_next_frame:true,confidence:1};
+
+test('SPRITED-only mode never requires Codex',async()=>{const supervisor=new CodexRepairSupervisor();const result=await supervisor.suggest({},fallback);assert.equal(result.strategy_source,'sprited');assert.equal(result.supervisor_used,false);});
+test('Codex Assist accepts structured actionable advice only',async()=>{const supervisor=new CodexRepairSupervisor({mode:'codex_assist',advisor:async()=>({issue_type:'leg_progression',recommended_strategy:'edit_with_neighbors',repair_instruction:'Reverse the leading leg while preserving identity.',use_previous_frame:true,use_next_frame:true,confidence:.82})});const result=await supervisor.suggest({animation_id:'a'},fallback);assert.equal(result.strategy_source,'codex_assist');assert.equal(result.recommended_strategy,'edit_with_neighbors');assert.equal(result.confidence,.82);});
+test('Codex failure falls back without blocking the pipeline',async()=>{const supervisor=new CodexRepairSupervisor({mode:'codex_assist',advisor:async()=>{throw Error('offline')}});const result=await supervisor.suggest({},fallback);assert.equal(result.strategy_source,'sprited_fallback');assert.match(result.supervisor_warning,/continued automatically/);});
+test('successful Codex advice becomes reusable SPRITED experience',async()=>{const root=await mkdtemp(path.join(tmpdir(),'sprited-codex-experience-'));try{const options={experiencePath:path.join(root,'experience.json'),timingPath:path.join(root,'timing.json')},experience=await new ExperienceService(options).init();for(const frame_index of [2,4])await experience.record_experience({animation_type:'WALKING',issue_type:'leg_progression',frame_index,repair_action:'edit_with_neighbors',strategy_source:'codex_assist',provider:'cloudflare_flux',technical_score_before:60,technical_score_after:95,repair_succeeded:true});const reloaded=await new ExperienceService(options).init(),records=reloaded.query_relevant_experience({animation_type:'WALKING',issue_type:'leg_progression',provider:'cloudflare_flux'}),ranked=reloaded.rank_repair_strategies({animation_type:'WALKING',issue_type:'leg_progression',provider:'cloudflare_flux'},'regenerate');assert.ok(records.every(record=>record.strategy_source==='codex_assist'));assert.equal(ranked.strategy_source,'experience');assert.equal(ranked.repair_action,'edit_with_neighbors');}finally{await rm(root,{recursive:true,force:true});}});

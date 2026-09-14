@@ -40,3 +40,16 @@ next-env.d.ts
 /.wrangler/
 /outputs/
 /work/
+/test-results/
+/build/
+/.sprited/
+/data/chatgpt-app/
+/automation/node_modules/
+*.exe
+*.zip
+*.safetensors
+*.ckpt
+*.tmp
+*.log
+secrets/
+secret/

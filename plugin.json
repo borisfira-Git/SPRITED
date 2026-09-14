@@ -1,0 +1,23 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "sprited",
+  "description": "Turn character references and generated frames into validated game animation SpriteSheets and GIFs.",
+  "version": "0.13.0-dev",
+  "extensions": {
+    "com.openai": {
+      "interface": {
+        "displayName": "SPRITED",
+        "shortDescription": "Build and repair game animation SpriteSheets in ChatGPT.",
+        "longDescription": "Prepare character animation prompts, slice generated SpriteSheets, validate motion and loops, repair weak frames, and export final GIF and PNG assets.",
+        "developerName": "SPRITED",
+        "category": "Creative tools",
+        "capabilities": ["Read", "Write"],
+        "defaultPrompt": [
+          "Use SPRITED to create an 8-frame walking animation from my character reference.",
+          "Analyze this SpriteSheet, identify weak frames, and prepare the smallest repair plan."
+        ],
+        "brandColor": "#1677FF"
+      }
+    }
+  }
+}

@@ -1,5 +1,15 @@
 {
   "default_provider": "external_manual",
+  "repair_intelligence": "sprited_only",
+  "policy": {
+    "default_provider": "chatgpt_assisted",
+    "fallback_providers": ["external_manual"],
+    "allow_paid_providers": false,
+    "allow_automatic_paid_fallback": false,
+    "require_confirmation_for_paid_request": true,
+    "max_paid_image_generations_per_animation": 3,
+    "max_paid_repair_generations_per_animation": 3
+  },
   "providers": {
     "local_process": {
       "enabled": false,
@@ -7,6 +17,29 @@
       "script": "C:\\path\\to\\SPRITED\\automation\\providers\\sprited-comfy-bridge.mjs",
       "arguments": ["C:\\path\\to\\comfyui-bridge.json"],
       "timeout_ms": 60000
+    },
+    "openai_api": {
+      "enabled": false,
+      "api_key_env": "OPENAI_API_KEY",
+      "model": "gpt-image-2.5-sunburst",
+      "default_size": "1024x1024",
+      "default_quality": "medium",
+      "timeout_ms": 120000
+    },
+    "gemini_api": {
+      "enabled": false,
+      "api_key_env": "GEMINI_API_KEY",
+      "model": "gemini-3.1-flash-image",
+      "default_resolution": "1K",
+      "timeout_ms": 120000,
+      "billing_note": "No Gemini API free tier is available for this image model."
+    },
+    "cloudflare_flux": {
+      "enabled": false,
+      "model": "@cf/black-forest-labs/flux-2-klein-4b",
+      "account_id_env": "CLOUDFLARE_ACCOUNT_ID",
+      "api_token_env": "CLOUDFLARE_API_TOKEN",
+      "timeout_ms": 120000
     }
   }
 }

@@ -9,6 +9,8 @@ try {
   $errorLog = Join-Path $DataDirectory 'library-server-errors.log'
   $startupLog = Join-Path $DataDirectory 'startup.log'
   $lockPath = Join-Path $DataDirectory '.sprited/automation.lock'
+  $expectedCli = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot 'cli.mjs'))
+  $obsoleteSpritedPid = $null
   function Trace-Startup($EventName, $Details) {
     $record = @{ time = [DateTime]::UtcNow.ToString('o'); event = $EventName; lock_path = $lockPath; details = $Details }
     Add-Content -LiteralPath $startupLog -Value ($record | ConvertTo-Json -Compress -Depth 5) -Encoding UTF8
@@ -68,6 +70,11 @@ try {
         if (-not (Test-Path -LiteralPath $serverCli)) { return $false }
         Trace-Startup 'process-commandline-unavailable' @{ pid = $owners[0]; verification = 'authenticated SPRITED identity/setup plus workspace/lock and actual port owner; never executable name alone' }
       }
+      if (-not [String]::Equals($serverCli, $expectedCli, [StringComparison]::OrdinalIgnoreCase)) {
+        $script:obsoleteSpritedPid = [int]$owners[0]
+        Trace-Startup 'obsolete-SPRITED-runtime' @{ pid = $owners[0]; running_cli_path = $serverCli; expected_cli_path = $expectedCli; cleanup = 'stop only the authenticated SPRITED server for this workspace, then start this package runtime' }
+        return $false
+      }
       Trace-Startup 'verified-SPRITED-server' @{ pid = $owners[0]; executable = $ownerProcess.Path; port = $uri.Port; cli_path = $serverCli; cleanup = 'none; reconnect to verified running server' }
       return $true
     } catch { Trace-Startup 'server-marker-not-verified' @{ cleanup = 'ignore marker; do not stop any process' }; return $false }
@@ -78,9 +85,18 @@ try {
     Write-Output ('SPRITED_STARTUP_OK: reconnected')
     exit 0
   }
+  if ($obsoleteSpritedPid) {
+    Stop-Process -Id $obsoleteSpritedPid -Force -ErrorAction Stop
+    for ($wait = 0; $wait -lt 50 -and (Get-Process -Id $obsoleteSpritedPid -ErrorAction SilentlyContinue); $wait++) { Start-Sleep -Milliseconds 100 }
+    if (Get-Process -Id $obsoleteSpritedPid -ErrorAction SilentlyContinue) { throw 'An older SPRITED runtime could not be stopped safely.' }
+    Trace-Startup 'obsolete-SPRITED-runtime-stopped' @{ pid = $obsoleteSpritedPid; cleanup = 'old server stopped; library data preserved' }
+  }
   Trace-Startup 'starting-service' @{ cleanup = 'ignore stale URL marker; service will validate lock owner'; port = 'OS-selected free localhost port' }
-  $node = (Get-Command node -ErrorAction Stop).Source
-  $cli = Join-Path $PSScriptRoot 'cli.mjs'
+  $bundleRoot = Split-Path $PSScriptRoot -Parent
+  $bundledNode = Join-Path $bundleRoot 'runtime\node.exe'
+  $node = if (Test-Path -LiteralPath $bundledNode) { $bundledNode } else { (Get-Command node -ErrorAction Stop).Source }
+  Trace-Startup 'runtime-selected' @{ executable = $node; bundled = (Test-Path -LiteralPath $bundledNode) }
+  $cli = $expectedCli
   $spawnHelper = Join-Path $PSScriptRoot 'spawn-service.mjs'
   $childId = & $node $spawnHelper $DataDirectory
   if ($LASTEXITCODE -ne 0 -or $childId -notmatch '^\d+$') { throw 'Could not launch the local service. See startup.log.' }

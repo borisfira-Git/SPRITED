@@ -1,0 +1,52 @@
+const text={type:'string',minLength:1,maxLength:4096},id={type:'string',minLength:1,maxLength:120},image={type:'string',minLength:1,maxLength:12*1024*1024},animation={type:'string',enum:['IDLE','HIT','DEATH','ATTACK','RANGE_ATTACK','WALKING']},mode={type:'string',enum:['fast','quality']};
+const semantic={type:'object',description:'Final visible findings only; never include hidden reasoning.',properties:{
+  passed:{type:'boolean'},score:{type:'integer',minimum:0,maximum:100},issues:{type:'array',maxItems:100,items:{type:'object',properties:{type:{type:'string'},frame_index:{type:'integer',minimum:0,maximum:23},severity:{type:'string',enum:['low','medium','high']},description:{type:'string',maxLength:500}},required:['type','severity','description'],additionalProperties:false}}
+},required:['passed','score','issues'],additionalProperties:false};
+export const chatgptTools=[
+  ['prepare_animation_prompt','Prepare a FAST or QUALITY animation prompt from a character reference and the existing SPRITED prompt engine.',{character_id:id,character_name:{type:'string',maxLength:120},reference_image_base64:image,reference_format:{type:'string',enum:['png','webp']},animation_type:animation,frame_count:{type:'integer',minimum:2,maximum:24},quality_mode:mode,prompt_mode:{type:'string',enum:['single_frame','full_sequence','spritesheet','continuity','repair','regenerate_bad_frames','next_frame','full_gait']},frame_index:{type:'integer',minimum:0,maximum:23},instruction:text},['animation_type']],
+  ['analyze_spritesheet','Import and slice one PNG/WebP SpriteSheet in reading order, then run the existing preview and technical validator.',{animation_id:id,character_id:id,animation_type:animation,image_base64:image,image_format:{type:'string',enum:['png','webp']},columns:{type:'integer',minimum:1,maximum:24},rows:{type:'integer',minimum:1,maximum:24},quality_mode:mode,semantic_result:semantic},['image_base64','columns','rows']],
+  ['build_preview','Build an ordered GIF preview from imported frames.',{animation_id:id,frame_duration_ms:{type:'integer',minimum:20,maximum:5000},loop:{type:'boolean'}},['animation_id']],
+  ['validate_animation','Run technical validation and optionally store ChatGPT visual findings.',{animation_id:id,quality_mode:mode,semantic_result:semantic},['animation_id']],
+  ['get_bad_frames','List the weak frame indexes selected by SPRITED.',{animation_id:id},['animation_id']],
+  ['prepare_repair_prompt','Create a targeted repair plan and prompt for the next weak frame.',{animation_id:id,quality_mode:mode,instruction:text},['animation_id']],
+  ['evaluate_quality','Return NEEDS_REPAIR, GOOD_ENOUGH, or EXCELLENT and the stop/export decision.',{animation_id:id,quality_mode:mode},['animation_id']],
+  ['get_learning_summary','Show compact learned repair and prompt lessons.',{animation_type:animation,issue_type:text,limit:{type:'integer',minimum:1,maximum:50}},[]],
+  ['get_recent_changes','Show human-readable recent changes and learning events.',{animation_type:animation,limit:{type:'integer',minimum:1,maximum:50}},[]],
+  ['export_spritesheet','Build the final PNG SpriteSheet after SPRITED reaches GOOD_ENOUGH or EXCELLENT.',{animation_id:id,columns:{type:'integer',minimum:1,maximum:24},spacing:{type:'integer',minimum:0,maximum:128},quality_mode:mode},['animation_id']],
+  ['export_gif','Export the final ordered GIF after SPRITED reaches GOOD_ENOUGH or EXCELLENT.',{animation_id:id,frame_duration_ms:{type:'integer',minimum:20,maximum:5000},quality_mode:mode},['animation_id']]
+].map(([name,description,properties,required])=>({name,title:name.replaceAll('_',' '),description,inputSchema:{type:'object',properties,required,additionalProperties:false},annotations:{readOnlyHint:['get_bad_frames','evaluate_quality','get_learning_summary','get_recent_changes'].includes(name)}}));
+
+const cleanResult=result=>{const value=structuredClone(result);delete value.output_paths;return value;};
+const defined=value=>Object.fromEntries(Object.entries(value).filter(([,item])=>item!==undefined));
+const dataUrl=(format,base64)=>{if(!['png','webp'].includes(format)||!/^[A-Za-z0-9+/=]+$/.test(base64||''))throw Error('A valid PNG/WebP image is required');return `data:image/${format};base64,${base64}`;};
+
+export class ChatGptAppAdapter{
+  constructor(service){this.service=service;}
+  async ensureRun(args){
+    if(args.animation_id)return args.animation_id;
+    let characterId=args.character_id;
+    if(!characterId){if(!args.reference_image_base64)throw Error('Provide character_id or a reference image');const src=dataUrl(args.reference_format||'png',args.reference_image_base64),character=await this.service.core('workflow/character/create',{name:args.character_name||'Character',src});characterId=character.id;await this.service.persist();}
+    const created=await this.service.call('agent/generate-animation',{character_id:characterId,animation_type:args.animation_type||'WALKING',frames:args.frame_count||8,provider:'chatgpt_assisted'});if(!created.success)throw Error(created.errors?.[0]||'Animation could not be created');return created.result.attempt_id||created.result.id;
+  }
+  async call(name,args={}){
+    if(name==='prepare_animation_prompt'){const animationId=await this.ensureRun(args),result=await this.service.call('agent/prepare-assisted-request',defined({animation_id:animationId,frame_index:args.frame_index||0,request_mode:args.prompt_mode||'spritesheet',quality_mode:args.quality_mode||'quality',instruction:args.instruction}));return cleanResult(result);}
+    if(name==='analyze_spritesheet'){
+      if(args.columns*args.rows>24)throw Error('SpriteSheet may contain at most 24 frames');const animationId=await this.ensureRun({...args,frame_count:args.columns*args.rows}),sliced=await this.service.core('slice-spritesheet',{src:dataUrl(args.image_format||'png',args.image_base64),columns:args.columns,rows:args.rows});
+      for(let index=0;index<sliced.frames.length;index++){const submitted=await this.service.call('agent/submit-frame',{animation_id:animationId,frame_index:index,provider:'external_manual',format:'png',image_base64:sliced.frames[index].split(',')[1]});if(!submitted.success)throw Error(submitted.errors?.[0]||`Frame ${index+1} failed`);}
+      const technical=await this.service.call('agent/validate-animation',{animation_id:animationId,quality_mode:args.quality_mode||'quality'});if(args.semantic_result)await this.service.call('agent/semantic-validate-animation',{animation_id:animationId,supervisor_result:args.semantic_result});const preview=await this.service.call('agent/build-gif',{animation_id:animationId});return {...cleanResult(technical),result:{animation_id:animationId,frame_count:sliced.frames.length,frame_size:[sliced.width,sliced.height],order:sliced.order,validation:technical.result,preview:preview.result},asset_reference:preview.result.asset_reference};
+    }
+    if(name==='build_preview'){const result=await this.service.call('agent/build-gif',defined({animation_id:args.animation_id,frame_duration_ms:args.frame_duration_ms,loop:args.loop}));return {...cleanResult(result),asset_reference:result.result?.asset_reference};}
+    if(name==='validate_animation'){const technical=await this.service.call('agent/validate-animation',defined({animation_id:args.animation_id,quality_mode:args.quality_mode}));if(args.semantic_result){const semanticResult=await this.service.call('agent/semantic-validate-animation',{animation_id:args.animation_id,supervisor_result:args.semantic_result});return cleanResult(semanticResult);}return cleanResult(technical);}
+    if(name==='get_bad_frames')return cleanResult(await this.service.call('agent/detect-bad-frames',args));
+    if(name==='prepare_repair_prompt'){const plan=await this.service.call('agent/get-repair-plan',{animation_id:args.animation_id});if(!plan.success)return cleanResult(plan);const frame=plan.result.frames_to_repair?.[0];if(!frame)throw Error('No frame currently needs repair');return cleanResult(await this.service.call('agent/prepare-assisted-request',defined({animation_id:args.animation_id,frame_index:frame.frame_index,repair_plan_id:plan.result.repair_plan_id,quality_mode:args.quality_mode||'quality',instruction:args.instruction})));}
+    if(name==='evaluate_quality')return cleanResult(await this.service.call('agent/get-animation-status',args));
+    if(name==='get_learning_summary')return cleanResult(await this.service.call('agent/get-experience-summary',args));
+    if(name==='get_recent_changes')return cleanResult(await this.service.call('agent/get-recent-changes',args));
+    if(['export_spritesheet','export_gif'].includes(name)){
+      const status=await this.service.call('agent/get-animation-status',{animation_id:args.animation_id,quality_mode:args.quality_mode||'quality'}),quality=status.result?.quality_state;if(!['GOOD_ENOUGH','EXCELLENT'].includes(quality))throw Error(`Export is blocked while quality is ${quality||'unknown'}`);
+      if(name==='export_gif'){const result=await this.service.call('agent/build-gif',defined({animation_id:args.animation_id,frame_duration_ms:args.frame_duration_ms}));return {...cleanResult(result),asset_reference:result.result.asset_reference};}
+      await this.service.call('agent/use-result',{id:args.animation_id});const result=await this.service.call('agent/build-spritesheet',defined({id:args.animation_id,cols:args.columns,spacing:args.spacing||0,retention:{keep_final_spritesheet:true}}));const png=result.output_paths?.find(value=>value.toLowerCase().endsWith('.png'));if(!png)throw Error('SpriteSheet PNG was not produced');const file=await this.service.input(png,['.png'],110*1024*1024);return {...cleanResult(result),download:{path:file,mime_type:'image/png',filename:'spritesheet.png'}};
+    }
+    throw Error('Unknown ChatGPT App tool');
+  }
+}

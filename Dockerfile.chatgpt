@@ -1,0 +1,12 @@
+FROM mcr.microsoft.com/playwright:v1.62.1-noble
+WORKDIR /app
+COPY automation/package*.json ./automation/
+RUN cd automation && npm ci --omit=dev
+COPY automation ./automation
+COPY static ./static
+COPY public ./public
+COPY app ./app
+ENV HOST=0.0.0.0 PORT=8080 SPRITED_BROWSER_CHANNEL=chromium SPRITED_PLAYWRIGHT=/app/automation/node_modules/playwright-core/index.js
+VOLUME ["/app/data/chatgpt-app"]
+EXPOSE 8080
+CMD ["node", "automation/chatgpt-server.mjs"]

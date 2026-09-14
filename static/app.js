@@ -697,8 +697,7 @@
   }
   async function confirmSlice() {
     const g=sliceGeometry(); if(g.cellW<1||g.cellH<1)return toast("The grid does not fit the image","error");
-    commit(); status("Slicing sprite sheet…"); const created=[];
-    for(let r=0;r<g.rows;r++)for(let col=0;col<g.cols;col++){const c=document.createElement("canvas");c.width=g.cellW;c.height=g.cellH;c.getContext("2d").drawImage(state.sliceImage,g.marginX+col*(g.cellW+g.gapX),g.marginY+r*(g.cellH+g.gapY),g.cellW,g.cellH,0,0,g.cellW,g.cellH);created.push(await makeFrame(c.toDataURL("image/png"),`${state.sliceName} ${String(created.length+1).padStart(2,"0")}`))}
+    commit(); status("Slicing sprite sheet…"); const created=await sliceImageGrid(state.sliceImage,g,state.sliceName,true);
     state.frames.push(...created);
     if (!state.selectedId && created[0]) {
       state.selectedId=created[0].id;state.selectedIds=[created[0].id];state.selectionAnchorId=created[0].id;
@@ -805,21 +804,26 @@
     const out=document.createElement("canvas");out.width=size.w;out.height=size.h;const x=out.getContext("2d");x.imageSmoothingEnabled=true;x.imageSmoothingQuality="high";x.drawImage(base,0,0,size.w,size.h);return out;
   }
   function prefix(){return($("#exportPrefix").value||state.projectName||"animation").trim().replace(/[^\w-]+/g,"_").replace(/^_+|_+$/g,"").toLowerCase()||"animation"}
-  function metadata(cols,size,exportFrames=state.frames){return{animation:prefix(),fps:state.fps,loop:state.loop,frame_width:size.w,frame_height:size.h,frames:exportFrames.length,horizontal_frames:Math.min(cols,exportFrames.length),vertical_frames:Math.ceil(exportFrames.length/cols),durations_ms:exportFrames.map(f=>f.duration),reference_frame:Math.max(0,exportFrames.findIndex(f=>f.id===state.referenceId)),alignment:$("#alignByBody")?.checked?state.alignmentMode:"manual",alignment_mode:state.alignmentMode,body_alignment:exportFrames.map(f=>({body_anchor_x:f.bodyAnchorX??null,right_foot_x:f.rightFootX??null,ground_y:f.bodyGroundY??null,manual_offset_x:f.manualOffsetX||0,manual_offset_y:f.manualOffsetY||0}))}}
+  function metadata(cols,size,exportFrames=state.frames,spacing=0){return{animation:prefix(),fps:state.fps,loop:state.loop,frame_width:size.w,frame_height:size.h,spacing,frames:exportFrames.length,horizontal_frames:Math.min(cols,exportFrames.length),vertical_frames:Math.ceil(exportFrames.length/cols),durations_ms:exportFrames.map(f=>f.duration),reference_frame:Math.max(0,exportFrames.findIndex(f=>f.id===state.referenceId)),alignment:$("#alignByBody")?.checked?state.alignmentMode:"manual",alignment_mode:state.alignmentMode,body_alignment:exportFrames.map(f=>({body_anchor_x:f.bodyAnchorX??null,right_foot_x:f.rightFootX??null,ground_y:f.bodyGroundY??null,manual_offset_x:f.manualOffsetX||0,manual_offset_y:f.manualOffsetY||0}))}}
   async function framesForExport(){
     if(!$("#alignByBody").checked)return state.frames;
     if(state.frames.every((frame)=>frame.bodyAligned&&frame.alignmentMode===state.alignmentMode&&Number.isFinite(frame.bodyAnchorX)&&Number.isFinite(frame.rightFootX)&&Number.isFinite(frame.bodyGroundY)))return state.frames;
     return(await prepareHeadToFeetFrames(state.frames,{mode:state.alignmentMode})).frames;
   }
-  async function buildSheet(cols, size) {
+  async function buildSheet(cols, size, spacing=0) {
     const exportFrames=await framesForExport();
     if (!exportFrames.length) throw new Error("Add frames before exporting.");
     const rows=Math.ceil(exportFrames.length/cols),c=document.createElement("canvas");
-    if(size.w*cols>16384 || size.h*rows>16384 || size.w*cols*size.h*rows>64*1024*1024) throw new Error("Sprite sheet is too large. Reduce frame size or columns.");
-    c.width=size.w*cols;c.height=size.h*rows;
+    const sheetWidth=size.w*cols+spacing*Math.max(0,cols-1),sheetHeight=size.h*rows+spacing*Math.max(0,rows-1);
+    if(sheetWidth>16384 || sheetHeight>16384 || sheetWidth*sheetHeight>64*1024*1024) throw new Error("Sprite sheet is too large. Reduce frame size, spacing or columns.");
+    c.width=sheetWidth;c.height=sheetHeight;
     const x=c.getContext("2d");x.imageSmoothingEnabled=true;x.imageSmoothingQuality="high";
-    for(let i=0;i<exportFrames.length;i++)x.drawImage(await renderedFrame(exportFrames[i],size),i%cols*size.w,Math.floor(i/cols)*size.h);
-    return {canvas:c,metadata:metadata(cols,size,exportFrames)};
+    for(let i=0;i<exportFrames.length;i++)x.drawImage(await renderedFrame(exportFrames[i],size),i%cols*(size.w+spacing),Math.floor(i/cols)*(size.h+spacing));
+    return {canvas:c,metadata:metadata(cols,size,exportFrames,spacing)};
+  }
+  async function sliceImageGrid(image,g,name="SpriteSheet",asFrames=false){
+    if(!image||g.cellW<1||g.cellH<1||g.cols*g.rows>24)throw Error("Invalid SpriteSheet grid");
+    const output=[];for(let r=0;r<g.rows;r++)for(let col=0;col<g.cols;col++){const c=document.createElement("canvas");c.width=g.cellW;c.height=g.cellH;c.getContext("2d").drawImage(image,g.marginX+col*(g.cellW+g.gapX),g.marginY+r*(g.cellH+g.gapY),g.cellW,g.cellH,0,0,g.cellW,g.cellH);const src=c.toDataURL("image/png");output.push(asFrames?await makeFrame(src,`${name} ${String(output.length+1).padStart(2,"0")}`):src)}return output;
   }
   async function exportSheet(){
     if(!state.frames.length)return;
@@ -1061,8 +1065,12 @@
           }
           return {warnings,frames:details,checks:"Geometry only; does not judge anatomy or motion quality."};
         }
-        case "build": { const built=await buildSheet(args.cols,{w:state.canvasWidth,h:state.canvasHeight});return {png:built.canvas.toDataURL("image/png"),metadata:built.metadata}; }
+        case "build": { const built=await buildSheet(args.cols,{w:state.canvasWidth,h:state.canvasHeight},Math.max(0,Number(args.spacing)||0));return {png:built.canvas.toDataURL("image/png"),metadata:built.metadata}; }
         case "preview": {const frames=[];for(const f of state.frames)frames.push({src:(await renderedFrame(f)).toDataURL("image/png"),duration:f.duration});return {frames,loop:state.loop};}
+        case "slice-spritesheet": {
+          const image=await loadImage(args.src),cols=Math.max(1,Number(args.columns)||1),rows=Math.max(1,Number(args.rows)||1),gapX=Math.max(0,Number(args.gap_x)||0),gapY=Math.max(0,Number(args.gap_y)||0),marginX=Math.max(0,Number(args.margin_x)||0),marginY=Math.max(0,Number(args.margin_y)||0),cellW=Math.floor((image.naturalWidth-marginX-gapX*(cols-1))/cols),cellH=Math.floor((image.naturalHeight-marginY-gapY*(rows-1))/rows);
+          const frames=await sliceImageGrid(image,{cols,rows,gapX,gapY,marginX,marginY,cellW,cellH},"SpriteSheet",false);return {frames,width:cellW,height:cellH,order:"left-to-right, top-to-bottom"};
+        }
         default: throw new Error("Unsupported SPRITED operation");
       }
     }
@@ -1091,8 +1099,8 @@
       throw Error('Frame not found');
     }
     if(action==='asset/find'){
-      for(const run of w.animation_runs){const asset=(run.contact_sheets||[]).find(item=>item.contact_sheet_id===args.id);if(asset)return result(asset);}
-      throw Error('Contact sheet not found');
+      for(const run of w.animation_runs){const asset=(run.contact_sheets||[]).find(item=>item.contact_sheet_id===args.id)||(run.gif_previews||[]).find(item=>item.preview_id===args.id);if(asset)return result(asset);}
+      throw Error('Animation asset not found');
     }
     if(action==='repair/find'){
       for(const run of w.animation_runs){const plan=(run.repair_plans||[]).find(item=>item.repair_plan_id===args.id);if(plan)return result({animation_id:run.id,plan});}
@@ -1102,7 +1110,7 @@
     if(r.job_id&&['animation/attach-video','animation/submit-result'].includes(action))throw Error('Use jobs/submit-result and an active claim token for a queued job');
     if(action==='animation/status')return result({...r,editor_snapshot:undefined});
     if(action==='animation/list-frames')return result((r.frame_records||[]).toSorted((a,b)=>a.frame_index-b.frame_index).map(({storage_path,...frame})=>frame));
-    if(action==='animation/set-image-provider'){if(!['external_manual','local_process','chatgpt_assisted'].includes(args.provider))throw Error('Unknown image provider');r.image_provider_id=args.provider;r.updated_at=new Date().toISOString();return result({animation_id:r.id,image_provider:r.image_provider_id});}
+    if(action==='animation/set-image-provider'){if(!['external_manual','local_process','chatgpt_assisted','openai_api','gemini_api','cloudflare_flux'].includes(args.provider))throw Error('Unknown image provider');r.image_provider_id=args.provider;r.updated_at=new Date().toISOString();return result({animation_id:r.id,image_provider:r.image_provider_id});}
     if(action==='animation/store-frame'){
       const records=r.frame_records||=[];let record;
       if(args.replace){record=records.find(frame=>frame.frame_id===args.record.frame_id);if(!record)throw Error('Frame not found');Object.assign(record,args.record,{frame_index:record.frame_index,created_at:record.created_at});}
@@ -1110,13 +1118,23 @@
       r.source_mode='direct_frames';r.source_frame_paths=[];r.output_frames_paths=[];r.editor_snapshot=null;r.validation=null;r.technical_validation=null;r.semantic_validation=null;r.combined_validation=null;r.current_preview_id=null;r.current_contact_sheet_id=null;r.sprite_sheet_path=null;r.godot_export_path=null;r.spritesheets=[];r.user_approved=false;r.approval_state='pending';r.status='collecting_frames';r.updated_at=new Date().toISOString();
       const {storage_path,...publicRecord}=record;return result(publicRecord);
     }
+    if(action==='animation/record-provider-usage'){if(!['paid_generations','paid_repairs'].includes(args.counter))throw Error('Unknown provider usage counter');r.provider_usage||={paid_generations:0,paid_repairs:0};r.provider_usage[args.counter]++;r.updated_at=new Date().toISOString();return result(r.provider_usage);}
     if(action==='animation/record-validation'){r.technical_validation=structuredClone(args.validation);if(args.combined)r.combined_validation=structuredClone(args.combined);return result(r.technical_validation);}
     if(action==='animation/record-preview'){r.gif_previews||=[];r.gif_previews.push(structuredClone(args.preview));r.current_preview_id=args.preview.preview_id;return result(args.preview);}
     if(action==='animation/record-contact-sheet'){r.contact_sheets||=[];r.contact_sheets.push(structuredClone(args.contact_sheet));r.current_contact_sheet_id=args.contact_sheet.contact_sheet_id;return result(args.contact_sheet);}
     if(action==='animation/record-semantic'){r.semantic_validations||=[];r.semantic_validations.push(structuredClone(args.validation));if(!args.validation.frame_id){r.semantic_validation=structuredClone(args.validation);r.semantic_reinspection_required=false;}r.combined_validation=structuredClone(args.combined);return result({validation:args.validation,combined_validation:r.combined_validation});}
     if(action==='animation/record-repair-plan'){r.repair_plans||=[];r.repair_plans.push(structuredClone(args.plan));r.repair_history||=[];r.repair_history.push({repair_plan_id:args.plan.repair_plan_id,animation_id:r.id,attempt:args.plan.attempt,repaired_frame_indexes:[],issue_reason_codes:[...new Set(args.plan.frames_to_repair.flatMap(frame=>frame.reasons))],previous_validation_score:args.plan.previous_validation_score,new_technical_score:null,created_at:args.plan.created_at});return result(args.plan);}
-    if(action==='animation/record-repair-frame'){const plan=(r.repair_plans||[]).find(item=>item.repair_plan_id===args.repair_plan_id);if(!plan||plan.status!=='active')throw Error('Repair plan is not active');if(!plan.repaired_frame_indexes.includes(args.frame_index))plan.repaired_frame_indexes.push(args.frame_index);const history=(r.repair_history||[]).find(item=>item.repair_plan_id===plan.repair_plan_id);if(history&&!history.repaired_frame_indexes.includes(args.frame_index))history.repaired_frame_indexes.push(args.frame_index);r.semantic_reinspection_required=true;r.updated_at=new Date().toISOString();return result(plan);}
-    if(action==='animation/record-repair-evaluation'){const plan=(r.repair_plans||[]).find(item=>item.repair_plan_id===args.repair_plan_id);if(!plan)throw Error('Repair plan not found');plan.status='evaluated';plan.new_technical_score=args.technical_score;plan.gif_preview_id=args.gif_preview_id;plan.contact_sheet_id=args.contact_sheet_id;plan.evaluated_at=new Date().toISOString();const history=(r.repair_history||[]).find(item=>item.repair_plan_id===plan.repair_plan_id);if(history)history.new_technical_score=args.technical_score;r.semantic_reinspection_required=true;r.updated_at=plan.evaluated_at;return result(plan);}
+    if(action==='animation/record-repair-frame'){const plan=(r.repair_plans||[]).find(item=>item.repair_plan_id===args.repair_plan_id);if(!plan||plan.status!=='active')throw Error('Repair plan is not active');if(!plan.repaired_frame_indexes.includes(args.frame_index))plan.repaired_frame_indexes.push(args.frame_index);plan.repair_results||=[];const prior=plan.repair_results.find(item=>item.frame_index===args.frame_index),entry={frame_index:args.frame_index,provider:args.provider||null,repair_action:args.repair_action||'regenerate',strategy_source:args.strategy_source||'default',instruction_summary:args.instruction_summary||null};if(prior)Object.assign(prior,entry);else plan.repair_results.push(entry);const history=(r.repair_history||[]).find(item=>item.repair_plan_id===plan.repair_plan_id);if(history&&!history.repaired_frame_indexes.includes(args.frame_index))history.repaired_frame_indexes.push(args.frame_index);r.semantic_reinspection_required=true;r.updated_at=new Date().toISOString();return result(plan);}
+    if(action==='animation/record-repair-evaluation'){const plan=(r.repair_plans||[]).find(item=>item.repair_plan_id===args.repair_plan_id);if(!plan)throw Error('Repair plan not found');plan.status='evaluated';plan.new_technical_score=args.technical_score;plan.gif_preview_id=args.gif_preview_id;plan.contact_sheet_id=args.contact_sheet_id;plan.evaluated_at=new Date().toISOString();const history=(r.repair_history||[]).find(item=>item.repair_plan_id===plan.repair_plan_id);if(history)history.new_technical_score=args.technical_score;r.semantic_reinspection_required=args.semantic_reinspection_required!==false;r.updated_at=plan.evaluated_at;return result(plan);}
+    if(action==='animation/record-failure'){r.status='failed';r.errors=[args.error];r.updated_at=new Date().toISOString();return result({animation_id:r.id,status:r.status,errors:r.errors});}
+    if(action==='animation/record-progress'){r.pipeline_progress=structuredClone(args.progress);r.updated_at=new Date().toISOString();return result(r.pipeline_progress);}
+    if(action==='animation/set-retention'){r.retention=structuredClone(args.retention);return result(r.retention);}
+    if(action==='animation/record-cleanup-plan'){r.cleanup_manifest=structuredClone(args.manifest);r.cleanup_pending=true;r.storage_state='finalized';r.temporary_artifact_count=args.manifest.temporary_artifact_count;r.retained_artifact_count=args.manifest.retained_artifact_count;return result(r.cleanup_manifest);}
+    if(action==='animation/complete-cleanup'){
+      if(!r.cleanup_manifest||r.cleanup_manifest.cleanup_id!==args.cleanup_id)throw Error('Cleanup manifest not found');const deleted=new Set(args.deleted_artifact_ids),entries=r.cleanup_manifest.entries;
+      for(const owner of w.animation_runs){const owned=new Set(entries.filter(item=>item.owner_animation_id===owner.id&&deleted.has(item.artifact_id)).map(item=>item.artifact_id)),paths=new Set(entries.filter(item=>item.owner_animation_id===owner.id&&deleted.has(item.artifact_id)).map(item=>item.output_path).filter(Boolean));if(!owned.size)continue;owner.frame_records=(owner.frame_records||[]).filter(item=>!owned.has(item.frame_id));owner.contact_sheets=(owner.contact_sheets||[]).filter(item=>!owned.has(item.contact_sheet_id));owner.gif_previews=(owner.gif_previews||[]).filter(item=>!owned.has(item.preview_id));if(owned.has(owner.current_contact_sheet_id))owner.current_contact_sheet_id=null;if(owned.has(owner.current_preview_id))owner.current_preview_id=null;for(const sheet of owner.spritesheets||[]){sheet.artifacts=(sheet.artifacts||[]).filter(item=>!owned.has(item.artifact_id));sheet.output_paths=(sheet.output_paths||[]).filter(item=>!paths.has(item));}if(entries.some(item=>item.owner_animation_id===owner.id&&['final_source_frame','failed_generation_frame','failed_repair_frame','obsolete_replaced_frame'].includes(item.role)&&deleted.has(item.artifact_id))){owner.source_frame_paths=[];owner.output_frames_paths=[];owner.editor_snapshot=null;}owner.storage_state='cleaned';}
+      r.cleanup_manifest.status='completed';r.cleanup_manifest.completed_at=new Date().toISOString();r.cleanup_pending=false;r.storage_state='cleaned';r.temporary_artifact_count=0;r.retained_artifact_count=entries.filter(item=>item.action==='retain').length;return result({storage_state:r.storage_state,temporary_artifact_count:0,retained_artifact_count:r.retained_artifact_count,cleanup_pending:false});
+    }
     if(action==='animation/configure'){const {id,...options}=args;const test=structuredClone(w);W.configure(test,id,options);commit();return W.configure(w,id,options);}
     if(action==='animation/attach-video'){commit();return W.attach(w,args.id,args.path);}
     if(action==='animation/submit-result'){
@@ -1140,7 +1158,7 @@
       return result({...run,editor_snapshot:undefined});
     }
     if(action==='animation/record-export'){r.sprite_sheet_path=args.paths.find(p=>p.endsWith('spritesheet.png'))||null;r.godot_export_path=args.paths.find(p=>p.endsWith('animation.tres'))||null;r.status='exported';r.updated_at=new Date().toISOString();return result({...r,editor_snapshot:undefined});}
-    if(action==='animation/record-sheet'){r.spritesheets ||= [];r.spritesheets.push({id:args.sheet_id,frame_count:args.frames,sampling:args.sampling,output_paths:args.paths,created_at:new Date().toISOString(),warnings:r.warnings});r.sprite_sheet_path=args.paths.find(p=>p.endsWith('spritesheet.png'));r.user_approved=args.approved;r.approval_state=args.approval_state;r.status=args.approved?'approved':'validated';return result({...r,editor_snapshot:undefined});}
+    if(action==='animation/record-sheet'){r.spritesheets ||= [];r.spritesheets.push({id:args.sheet_id,frame_count:args.frames,sampling:args.sampling,output_paths:args.paths,artifacts:structuredClone(args.artifacts||[]),created_at:new Date().toISOString(),warnings:r.warnings});r.sprite_sheet_path=args.paths.find(p=>p.endsWith('spritesheet.png'));r.user_approved=args.approved;r.approval_state=args.approval_state;r.status=args.approved?'approved':'validated';r.storage_state=args.approved?'finalized':'temporary';return result({...r,editor_snapshot:undefined});}
     if(action==='animation/route'){commit();return W.route(w,args.id,args.provider||'auto');}
     if(action==='animation/reject'){commit();return W.reject(w,args.id);}
     if(action==='animation/regenerate'){commit();return W.regenerate(w,args.id);}
