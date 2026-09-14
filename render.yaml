@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: sprited
+    runtime: docker
+    dockerfilePath: ./Dockerfile.chatgpt
+    dockerContext: .
