@@ -1,3 +1,4 @@
+import {validateMotionProgression} from './pose-planner.mjs';
 const median=values=>{if(!values.length)return 0;const sorted=[...values].sort((a,b)=>a-b),middle=Math.floor(sorted.length/2);return sorted.length%2?sorted[middle]:(sorted[middle-1]+sorted[middle])/2;};
 const adaptive=(values,floor)=>{const m=median(values),mad=median(values.map(value=>Math.abs(value-m)));return m+Math.max(floor,4*mad);};
 const round=value=>Math.round(value*10000)/10000;
@@ -15,7 +16,7 @@ const centers=(a,b)=>a.content&&b.content?{x:b.content.center_x-a.content.center
 const scale=(a,b)=>a.content&&b.content&&a.content.area&&b.content.area?Math.abs(Math.log(b.content.area/a.content.area)):null;
 const severity=(value,threshold)=>value>threshold*1.6?'high':'medium';
 
-export function validateAnimation(input,{background='#00ff00',loop=true,pose_plan=null}={}){
+export function validateAnimation(input,{background='#00ff00',loop=true,pose_plan=null,motion_observations={}}={}){
   const issues=[],indexes=input.map(frame=>frame.frame_index),unique=new Set(indexes),sorted=[...input].sort((a,b)=>a.frame_index-b.frame_index),expected=Array.from({length:sorted.length},(_,i)=>i);
   if(input.length<2)issues.push({type:'frame_count',severity:'high',value:input.length});
   if(unique.size!==indexes.length)issues.push({type:'duplicate_frame_index',severity:'high'});
@@ -29,7 +30,8 @@ export function validateAnimation(input,{background='#00ff00',loop=true,pose_pla
   const penalty={high:20,medium:10,low:5},score=Math.max(0,100-issues.reduce((sum,issue)=>sum+(penalty[issue.severity]||5),0));
   const ranked=new Map();for(const issue of issues){const targets=issue.frame!=null?[issue.frame]:issue.frames?.slice(-1)||[];for(const index of targets){const item=ranked.get(index)||{frame_index:index,reasons:[],priority:0};if(!item.reasons.includes(issue.type))item.reasons.push(issue.type);item.priority+=penalty[issue.severity]||5;ranked.set(index,item);}}
   const bad_frames=[...ranked.values()].sort((a,b)=>b.priority-a.priority||a.frame_index-b.frame_index).slice(0,Math.max(1,Math.floor(sorted.length/2))).map(({priority,...item})=>item);
-  return {animation_id:first?.animation_id||null,passed:issues.length===0,score,frame_count:input.length,issues,bad_frames,loop_validation:loopValidation,confidence:.8,confidence_label:'medium',phase_accuracy:null,phase_accuracy_confidence:.1,pose_plan_version:pose_plan?.version??null,paired_frame_diagnostics:[],metric_notes:'Deterministic pixel, bounds and ordering checks only; no anatomy or motion semantics.'};
+  const motion_progression_diagnostics=pose_plan?validateMotionProgression(pose_plan,motion_observations):[];for(const diagnostic of motion_progression_diagnostics)if(!diagnostic.natural_transition)issues.push({type:diagnostic.broken_loop?'broken_loop_transition':diagnostic.duplicate_mechanical_pose?'duplicate_mechanical_pose':diagnostic.skipped_phase?'skipped_phase':'motion_progression',frame_index:diagnostic.frame_index,severity:'high'});
+  return {animation_id:first?.animation_id||null,passed:issues.length===0,score,frame_count:input.length,issues,bad_frames,loop_validation:loopValidation,confidence:.8,confidence_label:'medium',phase_accuracy:null,phase_accuracy_confidence:.1,pose_plan_version:pose_plan?.version??null,motion_progression_diagnostics,paired_frame_diagnostics:[],metric_notes:'Deterministic pixel, bounds and ordering checks plus optional motion-blueprint progression checks.'};
 }
 
 function validateLoopFromAnalysis(frames,{diffs=[],centerSteps=[],scaleSteps=[],enabled=true}={}){

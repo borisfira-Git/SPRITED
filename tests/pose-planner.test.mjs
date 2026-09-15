@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {buildPosePlan,createRepairPlanDetails,validatePairedPoseRelation} from '../automation/pose-planner.mjs';
+import {buildPosePlan,createRepairPlanDetails,validatePairedPoseRelation,validateMotionProgression} from '../automation/pose-planner.mjs';
 import {createRepairPlan} from '../automation/repair-orchestrator.mjs';
 import {prepareAssistedRequest} from '../automation/chatgpt-assisted.mjs';
 import {ExternalManualVisionProvider} from '../automation/semantic-validator.mjs';
@@ -13,3 +13,5 @@ test('prompt uses pose and paired-frame requirements without silhouette over-con
 test('paired diagnostics flag same-side repetition',()=>{const plan=buildPosePlan(run),diagnostics=validatePairedPoseRelation(plan,{0:{lead_leg:'left'},4:{lead_leg:'left'}});assert.equal(diagnostics[0].lead_trail_swap_correct,false);assert.equal(diagnostics[0].incorrect_same_side_repetition,true);});
 test('repair details prioritize gait correctness over silhouette',()=>{const plan=buildPosePlan(run),details=createRepairPlanDetails({pose:plan.frames[4],issue:'leg_progression',description:'same side repeated',pairedFrame:plan.frames[0],neighbors:[3,5]});assert.ok(details.must_change.some(item=>/contralateral silhouette/i.test(item)));assert.match(details.must_not_change[0],/identity/i);});
 test('semantic validator exposes confidence so weak findings can be down-weighted',async()=>{const result=await new ExternalManualVisionProvider().validate_animation({animation_id:'walk',max_frame_index:7,supervisor_result:{passed:false,score:60,confidence:.3,phase_accuracy:.4,phase_accuracy_confidence:.2,issues:[{type:'leg_progression',frame_index:4,severity:'high',description:'uncertain lead leg'}],bad_frames:[4]}});assert.equal(result.confidence_label,'low');assert.equal(result.phase_accuracy_confidence,.2);});
+test('every frame gets unique mechanical blueprint and loop progression is checked',()=>{const plan=buildPosePlan(run);assert.equal(new Set(plan.frames.map(frame=>frame.mechanical_instruction)).size,8);const diagnostics=validateMotionProgression(plan,{7:{loop_break:true}});assert.equal(diagnostics.length,8);assert.equal(diagnostics.at(-1).broken_loop,true);});
+test('duplicate mechanical phases are detected',()=>{const plan=buildPosePlan(run),diagnostics=validateMotionProgression(plan,{0:{mechanical_signature:'same'},1:{mechanical_signature:'same'}});assert.equal(diagnostics[0].duplicate_mechanical_pose,true);});
