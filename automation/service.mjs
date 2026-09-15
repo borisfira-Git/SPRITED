@@ -40,6 +40,15 @@ const compactAgentResult=value=>{
   const result={};for(const [key,item] of Object.entries(value)){if(['reference_image','reference_image_path','storage_path','output_directory','source_video_path','source_frame_paths','output_frames_paths','extracted_frames_paths'].includes(key))continue;result[key]=compactAgentResult(item);}
   return result;
 };
+const referenceImage=(value,format='png')=>{
+  if(typeof value!=='string'||!value.trim())throw Error('A PNG or WebP reference image is required');
+  const data=value.startsWith('data:image/')?value:`data:image/${format};base64,${value}`;
+  const match=/^data:image\/(png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(data);
+  if(!match)throw Error('Reference image must be embedded PNG or WebP data');
+  const bytes=Buffer.from(match[2],'base64');
+  if(!bytes.length||bytes.length>9*1024*1024)throw Error('Reference image must be between 1 byte and 9 MB');
+  return {format:match[1],src:data,bytes};
+};
 export class Service {
   constructor(root,{codexRepairAdvisor=null,browserChannel=process.env.SPRITED_BROWSER_CHANNEL==='chromium'?null:'msedge'}={}){this.root=path.resolve(root);this.codexRepairAdvisor=codexRepairAdvisor;this.browserChannel=browserChannel;this.tail=Promise.resolve();this.defaultImageProvider='external_manual';this.providerPolicy=normalizeProviderPolicy();this.retentionService=new RetentionService();this.imageProviders={external_manual:new ExternalManualProvider(),chatgpt_assisted:new ChatGPTAssistedProvider()};this.visionProviders={external_manual:new ExternalManualVisionProvider()};this.manifest={version:1,character:'Character',animation:'animation',source_video:null,target_frames:24,background:'#00ff00',alignment:'body',frame_size:[512,512]};}
   async init(){
@@ -266,6 +275,16 @@ export class Service {
       if(action==='pipeline/run'){result=await this.pipelineController.run(args);const debug_snapshot=await this.debugOutput(result.animation_id,result.status?.toUpperCase()),attemptId=result.animation_id||null;return {...envelope({...compactAgentResult(result),attempt_id:attemptId,unverified_result:!attemptId,pipeline_status:attemptId?'SPRITED_ACTIVE':'UNVERIFIED_RESULT',validation_summary:result.technical_validation||null,debug_snapshot,next_attempt_plan:['accepted','ready'].includes(result.status)?null:(result.next_attempt_plan||null)},result.warnings||[],result.output_paths||[]),status:result.status};}
       if(action==='agent/list-characters')return envelope(compactAgentResult(await this.core('workflow/character/list')));
       if(action==='agent/get-character'){const character=await this.core('workflow/character/select',{id:args.id});return envelope({...compactAgentResult(character),content_reference:`character:${character.id}`});}
+      if(action==='agent/register-character'||action==='agent/set-character-reference'){
+        const image=referenceImage(args.reference_image,args.reference_format||'png'),dir=await this.directory('.sprited/references'),relative=path.relative(this.root,path.join(dir,`${randomUUID()}.${image.format}`));
+        const operation=action==='agent/register-character'?'workflow/character/create':'workflow/character/replace-reference';
+        const input=action==='agent/register-character'?{name:args.name.trim(),description:args.description||'',notes:args.description||'',id:args.id,src:image.src,path:relative}:{id:args.character_id,src:image.src,path:relative};
+        const character=await this.core(operation,input);
+        await writeFile(path.join(this.root,relative),image.bytes,{flag:'wx'});
+        await this.persist();
+        const publicCharacter=compactAgentResult(character);
+        return envelope({character_id:character.id,name:publicCharacter.name,description:publicCharacter.notes||null,content_reference:`character:${character.id}`,reference_image:{format:image.format,size_bytes:image.bytes.length,managed:true}});
+      }
       if(action==='agent/generate-animation'){
         const prepared=await this.prepareAnimationRun(args),{job,provider,decision}=prepared;return {...envelope({...compactAgentResult(job),image_provider:provider,selected_provider:provider,generation_mode:decision.generation_mode,user_action_required:decision.user_action_required,paid_request:decision.paid_request,confirmation_required:decision.confirmation_required,fallback_used:decision.fallback_used,...(prepared.prepared_request?{prepared_request:prepared.prepared_request}:{})}),status:decision.user_action_required?'user_action_required':'queued',next_suggested_action:decision.user_action_required?'Complete the prepared/manual image step, then call submit_frame.':'Call submit_frame for each frame index; SPRITED will invoke the configured provider once per frame.'};
       }

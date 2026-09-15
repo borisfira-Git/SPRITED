@@ -70,10 +70,11 @@
     for(const j of w.jobs){if(![j.job_id,j.character_id,j.attempt_id].every(v=>typeof v==='string'&&/^[a-zA-Z0-9_-]{1,120}$/.test(v))||!recipes.some(r=>r.animation_type===j.animation_type)||!w.animation_runs.some(r=>r.id===j.attempt_id))throw Error('Invalid persisted job');if(j.output_directory!==`SPRITED_DATA/characters/${j.character_id}/animations/${j.animation_type.toLowerCase()}/${j.attempt_id}`)throw Error('Invalid scoped job output directory');}
     return w;
   }
-  function setReference(w,{src,name,path='',notes=''}) {
+  function setReference(w,{src,name,path='',notes='',id:requestedId}) {
     image(src);if(typeof name!=='string'||!name.trim()||name.length>120)throw Error('Character name is required (max 120 characters)');
     const old=w.character_profile;
-    w.character_profile={id:old?.id||id(),name:name.trim(),reference_image:src,reference_image_path:path,created_at:old?.created_at||now(),updated_at:now(),notes,
+    const characterId=old?.id||requestedId||id();if(typeof characterId!=='string'||!/^[a-zA-Z0-9_-]{1,120}$/.test(characterId))throw Error('Invalid character id');
+    w.character_profile={id:characterId,name:name.trim(),reference_image:src,reference_image_path:path,created_at:old?.created_at||now(),updated_at:now(),notes,
       preferred_canvas_width:old?.preferred_canvas_width||256,preferred_canvas_height:old?.preferred_canvas_height||256,default_background_mode:'key',default_alignment_mode:'body'};
     w.characters ||= [];const index=w.characters.findIndex(c=>c.id===w.character_profile.id);if(index<0)w.characters.push(copy(w.character_profile));else w.characters[index]=copy(w.character_profile);
     return copy(w.character_profile);
@@ -119,10 +120,10 @@
   function library(w,action,a={}){
     if(action==='character/list')return copy(w.characters.filter(c=>!c.deleted_at).map(c=>({...c,attempt_count:w.animation_runs.filter(r=>r.character_profile_id===c.id).length})));
     if(action==='character/trash')return copy(w.characters.filter(c=>c.deleted_at));
-    if(action==='character/create'){if(w.characters.length>=100)throw Error('Maximum 100 characters');const old=w.character_profile;w.character_profile=null;try{return setReference(w,{src:a.src,name:a.name,path:a.path});}catch(e){w.character_profile=old;throw e;}}
+    if(action==='character/create'){if(w.characters.length>=100)throw Error('Maximum 100 characters');if(a.id&&w.characters.some(c=>c.id===a.id))throw Error('Character ID already exists');const old=w.character_profile;w.character_profile=null;try{return setReference(w,{src:a.src,name:a.name,path:a.path,notes:a.notes,id:a.id});}catch(e){w.character_profile=old;throw e;}}
     if(action==='character/select'){const c=character(w,a.id);if(c.deleted_at)throw Error('Restore this character from Trash first');w.character_profile=copy(c);return copy(c);}
     if(action==='character/rename'){const c=character(w,a.id);if(c.deleted_at)throw Error('Restore this character first');if(typeof a.name!=='string'||!a.name.trim()||a.name.length>120)throw Error('Name must be 1–120 characters');c.name=a.name.trim();c.updated_at=now();if(w.character_profile?.id===c.id)w.character_profile.name=c.name;return copy(c);}
-    if(action==='character/replace-reference'){const c=character(w,a.id);if(c.deleted_at)throw Error('Restore this character first');w.character_profile=copy(c);return setReference(w,{src:a.src,name:c.name,path:a.path});}
+    if(action==='character/replace-reference'){const c=character(w,a.id);if(c.deleted_at)throw Error('Restore this character first');w.character_profile=copy(c);return setReference(w,{src:a.src,name:c.name,path:a.path,notes:c.notes});}
     if(action==='character/delete'){const c=character(w,a.id);if(a.confirm_name!==c.name)throw Error('Confirm the exact character name to move it to Trash');c.deleted_at=now();if(w.character_profile?.id===c.id)w.character_profile=null;for(const j of w.jobs.filter(j=>j.character_id===c.id&&['QUEUED','CLAIMED','GENERATING'].includes(j.status))){j.status='CANCELLED';j.claim_token=null;}return copy(c);}
     if(action==='character/restore'){const c=character(w,a.id);c.deleted_at=null;return copy(c);}
     if(action==='character/purge'){
