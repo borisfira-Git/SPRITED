@@ -24,6 +24,7 @@ import {AnimationPipelineController} from './animation-pipeline-controller.mjs';
 import {ActivityService} from './activity-service.mjs';
 import {createSupervisorSession,observeRepairSession,deprioritizeLowPerformingStrategies,PROCESS_STATES} from './process-supervisor.mjs';
 import {buildPosePlan} from './pose-planner.mjs';
+import {scanReference} from './reference-scan.mjs';
 const appRoot=fileURLToPath(new URL('../',import.meta.url));
 export const envelope=(result={},warnings=[],output_paths=[])=>({success:true,status:'ok',result,warnings,errors:[],output_paths,next_suggested_action:null});
 export const failure=error=>({success:false,status:'failed',result:null,warnings:[],errors:[error.message||String(error)],output_paths:[],next_suggested_action:null});
@@ -259,6 +260,7 @@ export class Service {
       if(action==='agent/generate-animation'){
         const prepared=await this.prepareAnimationRun(args),{job,provider,decision}=prepared;return {...envelope({...compactAgentResult(job),image_provider:provider,selected_provider:provider,generation_mode:decision.generation_mode,user_action_required:decision.user_action_required,paid_request:decision.paid_request,confirmation_required:decision.confirmation_required,fallback_used:decision.fallback_used,...(prepared.prepared_request?{prepared_request:prepared.prepared_request}:{})}),status:decision.user_action_required?'user_action_required':'queued',next_suggested_action:decision.user_action_required?'Complete the prepared/manual image step, then call submit_frame.':'Call submit_frame for each frame index; SPRITED will invoke the configured provider once per frame.'};
       }
+      if(action==='agent/scan-reference'){result=scanReference(args);return {...envelope(result),status:result.quality,next_suggested_action:result.quality==='REFERENCE_LOW_CONFIDENCE'?'Review or confirm the extracted reference rules before generation.':'Use the reference motion blueprint for generation.'};}
       if(action==='agent/redo-animation'){
         const job=await this.core('workflow/attempts/redo',{id:args.id});await this.directory(job.output_directory);await writeFile(path.join(this.root,job.output_directory,'job.json'),JSON.stringify(job,null,2),{flag:'wx'});
         await this.persist();return {...envelope(compactAgentResult(job)),status:'queued',next_suggested_action:'Call submit_frame for each replacement frame.'};
