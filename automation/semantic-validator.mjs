@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 
-export const semanticIssueTypes=['anatomy','leg_progression','arm_leg_coordination','pose_duplicate','pose_regression','character_identity_drift','costume_or_armor_drift','direction_flip','silhouette_jump','motion_semantics','bad_visual_loop','other'];
+export const semanticIssueTypes=['anatomy','leg_progression','arm_leg_coordination','pose_duplicate','pose_regression','character_identity_drift','costume_or_armor_drift','equipment_drift','direction_flip','silhouette_jump','motion_semantics','bad_visual_loop','paired_phase_match','lead_trail_swap_correct','stride_amplitude_symmetry','pelvis_progression_symmetry','arm_counter_swing_match','incorrect_same_side_repetition','other'];
 
 const normalizeIssue=(issue,maxFrameIndex)=>{
   if(!issue||typeof issue!=='object'||Array.isArray(issue))throw Error('Invalid semantic issue');
@@ -17,7 +17,7 @@ const normalize=(result,{animation_id,frame_id,maxFrameIndex,source='external_ma
   const issues=result.issues.map(issue=>normalizeIssue(issue,maxFrameIndex));
   if(result.passed&&issues.some(issue=>issue.severity==='high'))throw Error('A passing semantic result cannot contain high-severity issues');
   const badFrames=[...new Set(issues.filter(issue=>issue.frame_index!==undefined).map(issue=>issue.frame_index))].sort((a,b)=>a-b),submitted=result.bad_frames?[...new Set(result.bad_frames)].sort((a,b)=>a-b):badFrames;if(submitted.length!==badFrames.length||submitted.some((value,index)=>value!==badFrames[index]))throw Error('bad_frames must match frame-specific semantic issues');
-  return {validation_id:randomUUID(),animation_id,...(frame_id?{frame_id}:{}),provider:source,semantic_score:result.score,passed:result.passed,issues,bad_frames:badFrames,created_at:new Date().toISOString()};
+  const confidence=Number.isFinite(result.confidence)?Math.max(0,Math.min(1,Number(result.confidence))):null;return {validation_id:randomUUID(),animation_id,...(frame_id?{frame_id}:{}),provider:source,semantic_score:result.score,confidence,confidence_label:confidence===null?'unknown':confidence<.6?'low':confidence<.85?'medium':'high',phase_accuracy:result.phase_accuracy??null,phase_accuracy_confidence:result.phase_accuracy_confidence??null,paired_frame_diagnostics:Array.isArray(result.paired_frame_diagnostics)?result.paired_frame_diagnostics.slice(0,24):[],passed:result.passed,issues,bad_frames:badFrames,created_at:new Date().toISOString()};
 };
 
 export class VisionSupervisor {
