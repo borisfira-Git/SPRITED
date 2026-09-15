@@ -16,8 +16,13 @@ try{
   await rpc('initialize',{clientInfo:{name:'character-ingestion-test'}});
   const listed=await rpc('tools/list');
   assert.equal(listed.result.tools.length,32);
-  assert.ok(listed.result.tools.some(tool=>tool.name==='register_character'));
-  assert.ok(listed.result.tools.some(tool=>tool.name==='set_character_reference'));
+  const registerTool=listed.result.tools.find(tool=>tool.name==='register_character');
+  const setReferenceTool=listed.result.tools.find(tool=>tool.name==='set_character_reference');
+  assert.ok(registerTool);
+  assert.ok(setReferenceTool);
+  assert.deepEqual(registerTool._meta,{'openai/fileParams':['reference_image']});
+  assert.deepEqual(setReferenceTool._meta,{'openai/fileParams':['reference_image']});
+  assert.equal(registerTool.inputSchema.properties.reference_image.anyOf[0].properties.download_url.type,'string');
   const register=await rpc('tools/call',{name:'register_character',arguments:{name:'Ingestion Test',id:'ingestion-test',description:'focused test',reference_image:png,reference_format:'png'}});
   assert.equal(register.result.isError,false,JSON.stringify(register));
   const created=register.result.structuredContent;
@@ -34,7 +39,10 @@ try{
   const duplicate=await rpc('tools/call',{name:'register_character',arguments:{name:'Duplicate',id:'ingestion-test',reference_image:png,reference_format:'png'}});
   assert.equal(duplicate.result.isError,true);
   assert.match(duplicate.result.structuredContent.errors[0],/already exists/);
-  const updated=await rpc('tools/call',{name:'set_character_reference',arguments:{character_id:'ingestion-test',reference_image:webp,reference_format:'webp'}});
+  const originalFetch=globalThis.fetch;
+  globalThis.fetch=async()=>new Response(Buffer.from(webp,'base64'),{status:200,headers:{'content-type':'image/webp'}});
+  const updated=await rpc('tools/call',{name:'set_character_reference',arguments:{character_id:'ingestion-test',reference_image:{download_url:'https://files.oaiusercontent.com/test.webp',file_id:'file_test',file_name:'test.webp',mime_type:'image/webp'},reference_format:'webp'}});
+  globalThis.fetch=originalFetch;
   assert.equal(updated.result.isError,false,JSON.stringify(updated));
   assert.equal(updated.result.structuredContent.result.character_id,'ingestion-test');
   assert.equal(updated.result.structuredContent.result.reference_image.format,'webp');

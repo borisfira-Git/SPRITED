@@ -40,14 +40,32 @@ const compactAgentResult=value=>{
   const result={};for(const [key,item] of Object.entries(value)){if(['reference_image','reference_image_path','storage_path','output_directory','source_video_path','source_frame_paths','output_frames_paths','extracted_frames_paths'].includes(key))continue;result[key]=compactAgentResult(item);}
   return result;
 };
-const referenceImage=(value,format='png')=>{
-  if(typeof value!=='string'||!value.trim())throw Error('A PNG or WebP reference image is required');
-  const data=value.startsWith('data:image/')?value:`data:image/${format};base64,${value}`;
-  const match=/^data:image\/(png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(data);
-  if(!match)throw Error('Reference image must be embedded PNG or WebP data');
-  const bytes=Buffer.from(match[2],'base64');
+const referenceImage=async(value,format='png')=>{
+  let mime=format==='webp'?'image/webp':'image/png',bytes;
+  if(value&&typeof value==='object'&&!Array.isArray(value)){
+    if(typeof value.download_url!=='string'||!value.download_url.trim())throw Error('The uploaded reference image has no usable download URL');
+    let url;try{url=new URL(value.download_url)}catch{throw Error('The uploaded reference image URL is invalid')}
+    if(url.protocol!=='https:')throw Error('Reference image download must use HTTPS');
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);
+    try{
+      const response=await fetch(url,{signal:controller.signal,redirect:'follow'});
+      if(!response.ok)throw Error(`Reference image download failed (${response.status})`);
+      const contentType=(response.headers.get('content-type')||'').split(';',1)[0].toLowerCase();
+      if(contentType==='image/png'||contentType==='image/webp')mime=contentType;
+      else if(!['image/png','image/webp'].includes(mime))throw Error('Reference image must be PNG or WebP');
+      const declared=Number(response.headers.get('content-length')||0);if(declared>9*1024*1024)throw Error('Reference image must be 9 MB or smaller');
+      bytes=Buffer.from(await response.arrayBuffer());
+    }catch(error){if(error?.name==='AbortError')throw Error('Reference image download timed out');throw error}finally{clearTimeout(timer)}
+  }else{
+    if(typeof value!=='string'||!value.trim())throw Error('A PNG or WebP reference image is required');
+    const data=value.startsWith('data:image/')?value:`data:image/${format};base64,${value}`;
+    const match=/^data:image\/(png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(data);
+    if(!match)throw Error('Reference image must be embedded PNG or WebP data');
+    bytes=Buffer.from(match[2],'base64');mime=`image/${match[1]}`;
+  }
   if(!bytes.length||bytes.length>9*1024*1024)throw Error('Reference image must be between 1 byte and 9 MB');
-  return {format:match[1],src:data,bytes};
+  const imageFormat=mime==='image/webp'?'webp':'png';
+  return {format:imageFormat,src:`data:${mime};base64,${bytes.toString('base64')}`,bytes};
 };
 export class Service {
   constructor(root,{codexRepairAdvisor=null,browserChannel=process.env.SPRITED_BROWSER_CHANNEL==='chromium'?null:'msedge'}={}){this.root=path.resolve(root);this.codexRepairAdvisor=codexRepairAdvisor;this.browserChannel=browserChannel;this.tail=Promise.resolve();this.defaultImageProvider='external_manual';this.providerPolicy=normalizeProviderPolicy();this.retentionService=new RetentionService();this.imageProviders={external_manual:new ExternalManualProvider(),chatgpt_assisted:new ChatGPTAssistedProvider()};this.visionProviders={external_manual:new ExternalManualVisionProvider()};this.manifest={version:1,character:'Character',animation:'animation',source_video:null,target_frames:24,background:'#00ff00',alignment:'body',frame_size:[512,512]};}
@@ -276,7 +294,7 @@ export class Service {
       if(action==='agent/list-characters')return envelope(compactAgentResult(await this.core('workflow/character/list')));
       if(action==='agent/get-character'){const character=await this.core('workflow/character/select',{id:args.id});return envelope({...compactAgentResult(character),content_reference:`character:${character.id}`});}
       if(action==='agent/register-character'||action==='agent/set-character-reference'){
-        const image=referenceImage(args.reference_image,args.reference_format||'png'),dir=await this.directory('.sprited/references'),relative=path.relative(this.root,path.join(dir,`${randomUUID()}.${image.format}`));
+        const image=await referenceImage(args.reference_image,args.reference_format||'png'),dir=await this.directory('.sprited/references'),relative=path.relative(this.root,path.join(dir,`${randomUUID()}.${image.format}`));
         const operation=action==='agent/register-character'?'workflow/character/create':'workflow/character/replace-reference';
         const input=action==='agent/register-character'?{name:args.name.trim(),description:args.description||'',notes:args.description||'',id:args.id,src:image.src,path:relative}:{id:args.character_id,src:image.src,path:relative};
         const character=await this.core(operation,input);
