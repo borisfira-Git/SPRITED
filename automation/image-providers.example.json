@@ -1,6 +1,7 @@
 {
   "default_provider": "external_manual",
   "repair_intelligence": "sprited_only",
+  "supervisor_strictness": "balanced",
   "policy": {
     "default_provider": "chatgpt_assisted",
     "fallback_providers": ["external_manual"],
