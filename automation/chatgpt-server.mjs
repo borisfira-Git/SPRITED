@@ -60,6 +60,7 @@ const server=createServer(async(req,res)=>{
   const resource=resourceFor(req);
 
   if(pathname==='/health'&&req.method==='GET')return json(res,200,{status:'ok',service:'sprited-chatgpt-app',version:'0.13.0-dev'});
+  if(pathname==='/'&&req.method==='GET'){res.writeHead(200,{'content-type':'text/html; charset=utf-8'});return res.end('<!doctype html><html><head><meta charset="utf-8"><title>SPRITED</title></head><body><h1>SPRITED</h1><p>SPRITED MCP server is running.</p><p>Health: /health<br>MCP: /mcp</p></body></html>');}
   if((pathname==='/.well-known/oauth-protected-resource'||pathname==='/.well-known/oauth-protected-resource/mcp')&&req.method==='GET')return json(res,200,{resource,authorization_servers:[origin],scopes_supported:['sprited:read','sprited:write'],bearer_methods_supported:['header']});
   if(pathname==='/.well-known/oauth-authorization-server'&&req.method==='GET')return json(res,200,{issuer:origin,authorization_endpoint:`${origin}/oauth/authorize`,token_endpoint:`${origin}/oauth/token`,registration_endpoint:`${origin}/oauth/register`,authorization_response_iss_parameter_supported:true,response_types_supported:['code'],grant_types_supported:['authorization_code','refresh_token'],token_endpoint_auth_methods_supported:['none'],code_challenge_methods_supported:['S256'],scopes_supported:['offline_access','sprited:read','sprited:write']});
 
