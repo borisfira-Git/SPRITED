@@ -224,12 +224,57 @@ export class Service {
     if(previous?.storage_path&&previous.storage_path!==record.storage_path&&!args.repair_plan_id){const old=await this.input(previous.storage_path,['.png','.webp'],9*1024*1024).catch(()=>null);if(old)await unlink(old).catch(()=>{});}
     const expected=run.options?.output_frames??run.recipe_snapshot?.default_output_frame_count??records.length+1,storedCount=replace?records.length:records.length+1;if(this.progressTracker)await this.recordProgress(run.id,storedCount>=expected?'validating':'generating',{provider:providerId,status_message:storedCount>=expected?'Frames ready for validation':`Frames received — ${storedCount}/${expected}`,remaining_operations:{generate_frame:Math.max(0,expected-storedCount),validation:1}});return result;
   }
+  async createAttemptFromSpritesheet(args){
+    const rows=args.rows,columns=args.columns,cellCount=rows*columns;
+    if(args.frame_count>cellCount)throw Error('FRAME_COUNT_MISMATCH: frame_count exceeds the supplied grid');
+    const order=args.frame_order||Array.from({length:args.frame_count},(_,index)=>index+1);
+    if(!Array.isArray(order)||order.length!==args.frame_count||new Set(order).size!==order.length||order.some(value=>!Number.isInteger(value)||value<1||value>cellCount))throw Error('GRID_DIMENSION_MISMATCH: frame_order must contain unique 1-based grid cells');
+    let source;
+    try{
+      if(args.source_image&&typeof args.source_image==='object'&&!Array.isArray(args.source_image)){
+        let url;try{url=new URL(args.source_image.download_url)}catch{throw Error('FILE_BRIDGE_FAILURE: source_image download URL is invalid');}
+        if(url.protocol!=='https:')throw Error('FILE_BRIDGE_FAILURE: source_image download URL must use HTTPS');
+        const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),20000);let response;
+        try{response=await fetch(url,{signal:controller.signal,redirect:'follow'});}catch(error){if(error?.name==='AbortError')throw Error('FILE_INPUT_FAILURE: source_image download timed out');throw Error(`FILE_BRIDGE_FAILURE: source_image download failed (${error.message||'network error'})`);}finally{clearTimeout(timer)}
+        if(!response.ok)throw Error(`FILE_BRIDGE_FAILURE: source_image download failed (${response.status})`);
+        const contentType=(response.headers.get('content-type')||'').split(';',1)[0].toLowerCase();if(!['image/png','image/webp'].includes(contentType))throw Error('FILE_INPUT_FAILURE: source_image must be PNG or WebP');
+        const declared=Number(response.headers.get('content-length')||0);if(declared>32*1024*1024)throw Error('FILE_INPUT_FAILURE: source_image is too large');
+        const bytes=Buffer.from(await response.arrayBuffer());if(!bytes.length||bytes.length>32*1024*1024)throw Error('FILE_INPUT_FAILURE: source_image is empty or too large');source={bytes,format:contentType==='image/webp'?'webp':'png',mime_type:contentType};
+      }else{
+        if(typeof args.source_image!=='string'||!args.source_image.trim())throw Error('FILE_INPUT_FAILURE: source_image is required');
+        const match=/^data:image\/(png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(args.source_image);if(!match)throw Error('FILE_INPUT_FAILURE: source_image must be a ChatGPT file object or embedded PNG/WebP data');
+        source={bytes:Buffer.from(match[2],'base64'),format:match[1],mime_type:`image/${match[1]}`};if(!source.bytes.length||source.bytes.length>32*1024*1024)throw Error('FILE_INPUT_FAILURE: source_image is empty or too large');
+      }
+      const src=`data:${source.mime_type};base64,${source.bytes.toString('base64')}`;
+      const sliced=await this.page.evaluate(async({src,rows,columns,order,outputWidth,outputHeight})=>{
+        const image=await new Promise((resolve,reject)=>{const value=new Image();value.onload=()=>resolve(value);value.onerror=()=>reject(Error('SOURCE_IMAGE_DECODE_FAILURE: source image could not be decoded'));value.src=src;});
+        if(!image.naturalWidth||!image.naturalHeight)throw Error('SOURCE_IMAGE_DECODE_FAILURE: source image has no dimensions');
+        const frames=order.map(cell=>{const index=cell-1,col=index%columns,row=Math.floor(index/columns),x=Math.round(col*image.naturalWidth/columns),y=Math.round(row*image.naturalHeight/rows),x2=Math.round((col+1)*image.naturalWidth/columns),y2=Math.round((row+1)*image.naturalHeight/rows),sourceWidth=x2-x,sourceHeight=y2-y,original=document.createElement('canvas');original.width=sourceWidth;original.height=sourceHeight;original.getContext('2d').drawImage(image,x,y,sourceWidth,sourceHeight,0,0,sourceWidth,sourceHeight);const canvas=document.createElement('canvas');canvas.width=outputWidth;canvas.height=outputHeight;const context=canvas.getContext('2d'),scale=Math.min(outputWidth/sourceWidth,outputHeight/sourceHeight),width=sourceWidth*scale,height=sourceHeight*scale;context.drawImage(original,0,0,sourceWidth,sourceHeight,(outputWidth-width)/2,(outputHeight-height)/2,width,height);return {original_data_url:original.toDataURL('image/png'),data_url:canvas.toDataURL('image/png'),width:outputWidth,height:outputHeight,source_width:sourceWidth,source_height:sourceHeight,cell};});
+        return {width:image.naturalWidth,height:image.naturalHeight,frames};
+      },{src,rows,columns,order,outputWidth:args.canvas_width||256,outputHeight:args.canvas_height||256});
+      if(sliced.frames.length!==args.frame_count||sliced.frames.some(frame=>!frame.width||!frame.height))throw Error('FRAME_EXTRACTION_FAILURE: one or more grid cells are empty');
+      const recipes=await this.core('workflow/recipes/list'),recipe=recipes.find(item=>item.animation_type===args.animation_type);
+      if(!recipe)throw Error(`Unknown animation type: ${args.animation_type}`);
+      const job=await this.core('workflow/jobs/create',{character_id:args.character_id,animation_type:args.animation_type,duration:recipe.target_duration,loop:recipe.loop,frames:args.frame_count,sampling:'uniform'});
+      const attemptId=job.attempt_id,runOptions={id:attemptId,source_frames:args.frame_count,output_frames:args.frame_count,canvas_width:args.canvas_width||256,canvas_height:args.canvas_height||256,background_mode:args.background_mode||'keep',background:'#00ff00',alignment:args.alignment||'body',cols:args.frame_count,start:0,end:1.6,loop:['IDLE','WALKING'].includes(args.animation_type),sampling:'uniform',source_mode:'local_animation'};
+      await this.core('workflow/animation/configure',runOptions);await this.ensurePosePlan(attemptId);await this.ensureMotionMemory(attemptId);
+      const runDir=await this.directory(`SPRITED_DATA/characters/${args.character_id}/animations/${args.animation_type.toLowerCase()}/${attemptId}`),sourceDir=await this.directory(path.relative(this.root,path.join(runDir,'recovery-source'))),sourceFile=path.join(sourceDir,`source.${source.format}`);await writeFile(sourceFile,source.bytes,{flag:'wx'});
+      const originalDir=await this.directory(path.relative(this.root,path.join(runDir,'recovery-original-frames'))),workingDir=await this.directory(path.relative(this.root,path.join(runDir,'frames'))),frameRecords=[];
+      for(const [frameIndex,frame] of sliced.frames.entries()){
+        const originalBytes=Buffer.from(frame.original_data_url.split(',')[1],'base64'),bytes=Buffer.from(frame.data_url.split(',')[1],'base64'),frameId=randomUUID(),originalFile=path.join(originalDir,`${String(frameIndex+1).padStart(2,'0')}-${frameId}.png`),workingFile=path.join(workingDir,`${frameId}.png`);await writeFile(originalFile,originalBytes,{flag:'wx'});await writeFile(workingFile,bytes,{flag:'wx'});
+        const record={frame_id:frameId,character_id:args.character_id,animation_id:attemptId,frame_index:frameIndex,format:'png',width:frame.width,height:frame.height,created_at:new Date().toISOString(),provider:'recovery_import',storage_path:path.relative(this.root,workingFile)};await this.core('workflow/animation/store-frame',{id:attemptId,record});frameRecords.push({frame_id:frameId,frame_index:frameIndex,width:frame.width,height:frame.height});
+      }
+      await this.core('workflow/animation/record-recovery-import',{id:attemptId,recovery_import:{source_format:source.format,source_width:sliced.width,source_height:sliced.height,rows,columns,frame_count:args.frame_count,frame_order:order,source_storage:path.relative(this.root,sourceFile),original_frame_count:frameRecords.length,notes:args.notes||null,status:'IMPORTED_NEEDS_VALIDATION'}});
+      await this.persist();
+      return {attempt_id:attemptId,character_id:args.character_id,animation_type:args.animation_type,source_layout:{rows,columns,frame_count:args.frame_count,frame_order:order,width:sliced.width,height:sliced.height},extracted_frame_count:frameRecords.length,frames:frameRecords,storage_status:'persisted',validation_readiness:'NEEDS_VALIDATION',debug_snapshot:{file_input_recognized:true,source_dimensions:{width:sliced.width,height:sliced.height},grid_dimensions:{rows,columns},extracted_frame_count:frameRecords.length,attempt_created:true,frames_persisted:true,list_frames_visible:true,validation_ready:true,build_spritesheet_ready:true},source_image:{format:source.format,size_bytes:source.bytes.length,managed:true}};
+    }catch(error){throw Error(error.message||'FRAME_EXTRACTION_FAILURE');}
+  }
   async materializeStoredFrames(id){
     const run=await this.core('workflow/animation/status',{id}),records=(run.frame_records||[]).toSorted((a,b)=>a.frame_index-b.frame_index);
     if(records.length<2)throw Error('Submit at least two frames before building a sprite sheet');
     if(records.some((frame,index)=>frame.frame_index!==index))throw Error('Frame indexes must be contiguous and start at 0');
     const frames=[];for(const record of records){const file=await this.input(record.storage_path,['.png','.webp'],9*1024*1024),bytes=await readFile(file);frames.push({path:record.storage_path,name:`Frame ${String(record.frame_index+1).padStart(2,'0')}`,src:`data:image/${record.format};base64,${bytes.toString('base64')}`});}
-    return this.core('workflow/animation/attach-frames',{id,frames,provider:run.image_provider_id||'external_manual'});
+    return this.core('workflow/animation/load-stored-frames',{id,frames,canvas_width:run.options?.canvas_width,canvas_height:run.options?.canvas_height,alignment:run.options?.alignment,loop:run.options?.loop});
   }
   async decodeStoredFrames(id,full=false){
     const run=await this.core('workflow/animation/status',{id}),records=run.frame_records||[],inputs=[];
@@ -302,6 +347,11 @@ export class Service {
         await this.persist();
         const publicCharacter=compactAgentResult(character);
         return envelope({character_id:character.id,name:publicCharacter.name,description:publicCharacter.notes||null,content_reference:`character:${character.id}`,reference_image:{format:image.format,size_bytes:image.bytes.length,managed:true}});
+      }
+      if(action==='agent/create-attempt-from-spritesheet'){
+        const imported=await this.createAttemptFromSpritesheet(args);
+        await this.activityService?.record({event_type:'attempt_created',animation_type:args.animation_type,character_id:args.character_id,attempt_id:imported.attempt_id,success:true,summary:'Recovery spritesheet imported into a persisted SPRITED attempt.'});
+        return envelope(imported,[],[]);
       }
       if(action==='agent/generate-animation'){
         const prepared=await this.prepareAnimationRun(args),{job,provider,decision}=prepared;return {...envelope({...compactAgentResult(job),image_provider:provider,selected_provider:provider,generation_mode:decision.generation_mode,user_action_required:decision.user_action_required,paid_request:decision.paid_request,confirmation_required:decision.confirmation_required,fallback_used:decision.fallback_used,...(prepared.prepared_request?{prepared_request:prepared.prepared_request}:{})}),status:decision.user_action_required?'user_action_required':'queued',next_suggested_action:decision.user_action_required?'Complete the prepared/manual image step, then call submit_frame.':'Call submit_frame for each frame index; SPRITED will invoke the configured provider once per frame.'};

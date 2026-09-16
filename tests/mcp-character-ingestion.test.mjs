@@ -15,7 +15,7 @@ try{
   const rpc=async(method,params={})=>session.handle({jsonrpc:'2.0',id:Math.random(),method,params});
   await rpc('initialize',{clientInfo:{name:'character-ingestion-test'}});
   const listed=await rpc('tools/list');
-  assert.equal(listed.result.tools.length,32);
+  assert.equal(listed.result.tools.length,33);
   const registerTool=listed.result.tools.find(tool=>tool.name==='register_character');
   const setReferenceTool=listed.result.tools.find(tool=>tool.name==='set_character_reference');
   assert.ok(registerTool);

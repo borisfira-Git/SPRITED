@@ -1133,6 +1133,7 @@
     if(action==='animation/restore-best-known'){const best=r.process_supervisor?.best_known_result;if(!best||!Array.isArray(best.frame_records))throw Error('BEST_KNOWN_RESULT is unavailable');r.frame_records=structuredClone(best.frame_records);r.technical_validation=structuredClone(best.technical_validation);r.semantic_validation=structuredClone(best.semantic_validation);r.combined_validation=structuredClone(best.combined_validation);r.semantic_reinspection_required=false;r.source_frame_paths=[];r.output_frames_paths=[];r.editor_snapshot=null;r.status=args.halt?'halted':'validated';r.updated_at=new Date().toISOString();return result({animation_id:r.id,restored:true,score:best.score,frame_records:r.frame_records});}
     if(action==='animation/record-failure'){r.status='failed';r.errors=[args.error];r.updated_at=new Date().toISOString();return result({animation_id:r.id,status:r.status,errors:r.errors});}
     if(action==='animation/record-progress'){r.pipeline_progress=structuredClone(args.progress);r.updated_at=new Date().toISOString();return result(r.pipeline_progress);}
+    if(action==='animation/record-recovery-import'){r.recovery_import=structuredClone(args.recovery_import);r.status='collecting_frames';r.approval_state='pending';r.user_approved=false;r.updated_at=new Date().toISOString();return result(r.recovery_import);}
     if(action==='animation/set-retention'){r.retention=structuredClone(args.retention);return result(r.retention);}
     if(action==='animation/record-cleanup-plan'){r.cleanup_manifest=structuredClone(args.manifest);r.cleanup_pending=true;r.storage_state='finalized';r.temporary_artifact_count=args.manifest.temporary_artifact_count;r.retained_artifact_count=args.manifest.retained_artifact_count;return result(r.cleanup_manifest);}
     if(action==='animation/complete-cleanup'){
@@ -1161,6 +1162,12 @@
       run.validation=await window.SpritedCore.dispatch('validate');run.warnings=[...run.validation.warnings];run.status='validated';run.updated_at=new Date().toISOString();run.editor_snapshot=editorSnapshot();
       const job=state.workflow.jobs.find(j=>j.attempt_id===run.id);if(job){job.status='RESULT_SUBMITTED';job.result_paths=[...run.source_frame_paths];job.claim_token=null;job.updated_at=run.updated_at;}
       return result({...run,editor_snapshot:undefined});
+    }
+    if(action==='animation/load-stored-frames'){
+      if(!Array.isArray(args.frames)||args.frames.length<2||args.frames.length>24)throw Error('Provide 2–24 stored PNG/WebP frames');
+      const frames=[];for(const input of args.frames)frames.push(await makeFrame(input.src,input.name||`Frame ${frames.length+1}`));
+      state.frames=frames;state.selectedId=frames[0]?.id||null;state.selectedIds=frames.map(frame=>frame.id);state.referenceId=state.selectedId;state.canvasWidth=args.canvas_width||frames[0]?.sourceWidth||256;state.canvasHeight=args.canvas_height||frames[0]?.sourceHeight||256;state.loop=args.loop!==false;state.alignmentMode=args.alignment||'body';
+      r.editor_snapshot=editorSnapshot();r.source_frame_paths=args.frames.map(input=>input.path);r.output_frames_paths=[];r.status='validated';r.updated_at=new Date().toISOString();return result({animation_id:r.id,frame_count:frames.length});
     }
     if(action==='animation/record-export'){r.sprite_sheet_path=args.paths.find(p=>p.endsWith('spritesheet.png'))||null;r.godot_export_path=args.paths.find(p=>p.endsWith('animation.tres'))||null;r.status='exported';r.updated_at=new Date().toISOString();return result({...r,editor_snapshot:undefined});}
     if(action==='animation/record-sheet'){r.spritesheets ||= [];r.spritesheets.push({id:args.sheet_id,frame_count:args.frames,sampling:args.sampling,output_paths:args.paths,artifacts:structuredClone(args.artifacts||[]),created_at:new Date().toISOString(),warnings:r.warnings});r.sprite_sheet_path=args.paths.find(p=>p.endsWith('spritesheet.png'));r.user_approved=args.approved;r.approval_state=args.approval_state;r.status=args.approved?'approved':'validated';r.storage_state=args.approved?'finalized':'temporary';return result({...r,editor_snapshot:undefined});}
