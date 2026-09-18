@@ -1,5 +1,13 @@
 # SPRITED automation 0.8.0-preview.1
 
+## Video Generator workflow for local MCP clients
+
+The standard local MCP server now exposes `generate_animation`, `upload_video`, `extract_frames`, `remove_background`, `build_spritesheet`, `export_sprite_asset`, `list_character_profiles`, and `get_character_history`. These are normal stdio/HTTP MCP tools, not ChatGPT Plugin tools.
+
+`generate_animation` accepts a saved `character_id`, prompt, animation type, and exact frame count. It uses only the external Video Generator API configured in the server environment, polls the provider until the video is ready, then produces a transparent PNG SpriteSheet, JSON metadata, GIF preview, and ZIP of frames. `upload_video` uses the same processing/export path for an existing video.
+
+Copy `../.env.example` into your secure server environment. Do not put `SPRITED_VIDEO_API_KEY` in the browser, an MCP argument, or a chat message. The generic provider accepts Pika, Kling, Runway, or another compatible HTTP API by setting `SPRITED_VIDEO_PROVIDER`, `SPRITED_VIDEO_API_URL`, and `SPRITED_VIDEO_STATUS_URL_TEMPLATE`.
+
 The new connected Character Library, job queue and 49-tool MCP workflow are documented in `../LIBRARY-GUIDE.md`. Use `mcp --api http://127.0.0.1:47821` with `SPRITED_TOKEN` when the library GUI/server already owns the workspace. The new `/ui/` interface shares the server library; the standalone editor below remains independent. No AI generator is included.
 
 ## Original 0.7.0 processing commands (retained)

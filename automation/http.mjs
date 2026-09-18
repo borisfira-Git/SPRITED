@@ -31,7 +31,7 @@ export async function serve(service,port=47821,token=process.env.SPRITED_TOKEN||
         if(req.method==='DELETE'){const session=mcpSessions.get(sessionId);if(!session)throw Error('Unknown MCP session');await session.close();mcpSessions.delete(sessionId);res.writeHead(204);res.end();return;}
         if(req.method!=='POST'){res.setHeader('allow','POST, DELETE');res.writeHead(405);res.end(JSON.stringify({jsonrpc:'2.0',id:null,error:{code:-32600,message:'Use MCP Streamable HTTP POST'}}));return;}
         let size=0,chunks=[];for await(const chunk of req){size+=chunk.length;if(size>65536)throw Error('MCP request too large');chunks.push(chunk);}const message=JSON.parse(Buffer.concat(chunks).toString()||'{}');
-        let session=mcpSessions.get(sessionId),created=false;if(message.method==='initialize'&&!session){session=createMcpSession(service,{plugin:true});mcpSessions.set(session.sessionId,session);created=true;}if(!session)throw Error('Initialize an MCP session first');
+        let session=mcpSessions.get(sessionId),created=false;if(message.method==='initialize'&&!session){session=createMcpSession(service,{plugin:false});mcpSessions.set(session.sessionId,session);created=true;}if(!session)throw Error('Initialize an MCP session first');
         const reply=await session.handle(message);if(created)res.setHeader('mcp-session-id',session.sessionId);if(!reply){res.writeHead(202);res.end();return;}res.setHeader('content-type','application/json');res.end(JSON.stringify(reply));return;
       }
       if(url.pathname==='/connections/configure'&&req.method==='POST'){
@@ -40,6 +40,12 @@ export async function serve(service,port=47821,token=process.env.SPRITED_TOKEN||
       }
       if(url.pathname==='/identity'&&req.method==='GET'){res.end(JSON.stringify({application:'SPRITED',pid:process.pid,workspace:service.root,cli_path:path.join(root,'automation','cli.mjs')}));return;}
       if(url.pathname==='/ui/editor-project'&&req.method==='GET'){await service.tail;res.end(JSON.stringify(await service.core('snapshot')));return;}
+      if(url.pathname==='/ui/artifact'&&req.method==='GET'){
+        const requested=url.searchParams.get('path');if(!requested)throw Error('Artifact path is required');
+        const file=await service.input(requested,['.png','.json','.gif','.zip','.spriteproject'],110*1024*1024),extension=path.extname(file).toLowerCase();
+        const type={'.png':'image/png','.json':'application/json','.gif':'image/gif','.zip':'application/zip','.spriteproject':'application/json'}[extension]||'application/octet-stream';
+        res.setHeader('content-type',type);res.setHeader('content-disposition',`attachment; filename="${path.basename(file)}"`);res.end(await readFile(file));return;
+      }
       const asset=url.pathname.match(/^\/sheets\/([a-zA-Z0-9_-]+)\/asset\/(\d+)$/);
       if(asset&&req.method==='GET'){const r=await service.call('attempts/list');const sheet=r.result.flatMap(r=>r.spritesheets||[]).find(s=>s.id===asset[1]);const candidate=sheet?.output_paths[Number(asset[2])];if(!candidate)throw Error('Unknown sheet asset');const file=await service.input(candidate,['.png','.json','.spriteproject','.tres'],110*1024*1024);res.setHeader('content-type',file.endsWith('.png')?'image/png':'application/octet-stream');res.end(await readFile(file));return;}
       if(url.pathname==='/ui/reference'&&req.method==='POST'){

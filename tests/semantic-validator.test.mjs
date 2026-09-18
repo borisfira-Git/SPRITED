@@ -15,7 +15,9 @@ test('rejects invalid semantic results',async()=>{
   await assert.rejects(()=>provider.validate_frame({animation_id:'a',frame_id:'f',supervisor_result:{passed:true,score:101,issues:[]}}),/Invalid semantic validation result/);
 });
 test('combined validation fails when either required validator fails',()=>{
-  assert.equal(combineValidation({passed:true,score:91},{passed:false,semantic_score:45}).overall_passed,false);
-  assert.equal(combineValidation({passed:false,score:50},{passed:true,semantic_score:95}).overall_passed,false);
-  assert.equal(combineValidation({passed:true,score:91},{passed:true,semantic_score:95}).overall_passed,true);
+  const temporal={status:'PASS',passed:true,motion_approved:true};
+  assert.equal(combineValidation({passed:true,score:91},{passed:false,semantic_score:45},temporal).overall_passed,false);
+  assert.equal(combineValidation({passed:false,score:50},{passed:true,semantic_score:95},temporal).overall_passed,false);
+  assert.equal(combineValidation({passed:true,score:91},{passed:true,semantic_score:95},temporal).overall_passed,true);
+  assert.equal(combineValidation({passed:true,score:91},{passed:true,semantic_score:95}).overall_passed,false);
 });

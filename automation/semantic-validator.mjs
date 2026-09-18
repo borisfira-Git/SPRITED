@@ -30,8 +30,9 @@ export class ExternalManualVisionProvider extends VisionSupervisor {
   async validate_animation({animation_id,max_frame_index,supervisor_result}){return normalize(supervisor_result,{animation_id,maxFrameIndex:max_frame_index});}
 }
 
-export function combineValidation(technical,semantic){
+export function combineValidation(technical,semantic,temporal=technical?.temporal_validation||null){
   const technicalSummary=technical?{score:technical.score,passed:Boolean(technical.passed)}:null;
   const semanticSummary=semantic?{score:semantic.semantic_score,passed:Boolean(semantic.passed)}:null;
-  return {technical:technicalSummary,semantic:semanticSummary,overall_passed:Boolean(technicalSummary?.passed&&semanticSummary?.passed)};
+  const temporalSummary=temporal?{status:temporal.status,passed:Boolean(temporal.passed),motion_approved:Boolean(temporal.motion_approved),observed_transitions:temporal.observation_coverage?.observed??null,required_transitions:temporal.observation_coverage?.required??null}:null;
+  return {technical:technicalSummary,semantic:semanticSummary,temporal:temporalSummary,overall_passed:Boolean(technicalSummary?.passed&&semanticSummary?.passed&&temporalSummary?.passed)};
 }

@@ -96,3 +96,10 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 
 - [vinext Documentation](https://github.com/cloudflare/vinext)
 - [Drizzle D1 Guide](https://orm.drizzle.team/docs/get-started/d1-new)
+# Video Generator → SpriteSheet (MCP)
+
+SPRITED can now be controlled from a local MCP client such as Codex. Register a character once, then call `generate_animation` with its `character_id`, a prompt, animation type and frame count. SPRITED calls the configured external Video Generator API, waits for its job, downloads the result, extracts transparent frames, aligns them and exports PNG, JSON, GIF and ZIP artifacts.
+
+Copy `.env.example` to `.env` (or set the same environment values in the process that runs SPRITED). `SPRITED_VIDEO_API_KEY` is read only by the server process and is never accepted through MCP or exposed in the browser. `SPRITED_VIDEO_PROVIDER=mock` is test-only and requires `SPRITED_MOCK_VIDEO_PATH`; it does not run a local model.
+
+Run the local MCP server with `node automation/cli.mjs mcp --workspace C:/Sprites/Guardian`. The main chat workflow is: `register_character` → `generate_animation` → download the returned artifacts. Use `upload_video` when a video already exists.
